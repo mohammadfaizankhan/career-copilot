@@ -2351,12 +2351,21 @@ def delete_ats(
     client = client_for(settings, user)
     owned_row(client, "ats_analyses", analysis_id, user)
     try:
-        client.table("resume_improvement_runs").update({"ats_analysis_id": None}).eq(
-            "ats_analysis_id", str(analysis_id)
-        ).eq("user_id", str(user.id)).execute()
-        client.table("resume_suggestions").update({"analysis_id": None}).eq(
-            "analysis_id", str(analysis_id)
-        ).eq("user_id", str(user.id)).execute()
+        # These nullable reference cleanups are independent. Running them in
+        # parallel removes two avoidable network round trips from deletion.
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="ats-delete") as executor:
+            detach_runs = executor.submit(
+                lambda: client.table("resume_improvement_runs").update({"ats_analysis_id": None}).eq(
+                    "ats_analysis_id", str(analysis_id)
+                ).eq("user_id", str(user.id)).execute()
+            )
+            detach_suggestions = executor.submit(
+                lambda: client.table("resume_suggestions").update({"analysis_id": None}).eq(
+                    "analysis_id", str(analysis_id)
+                ).eq("user_id", str(user.id)).execute()
+            )
+            detach_runs.result()
+            detach_suggestions.result()
         client.table("ats_evidence").delete().eq("analysis_id", str(analysis_id)).eq(
             "user_id", str(user.id)
         ).execute()

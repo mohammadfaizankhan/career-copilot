@@ -541,7 +541,8 @@ function AtsHistoryList() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
 
   async function loadAnalyses() {
     const rows = await apiRequest<Analysis[]>("/ats-analyses");
@@ -567,19 +568,54 @@ function AtsHistoryList() {
     };
   }, []);
 
-  async function deleteAnalysis(analysisId: string) {
-    if (!window.confirm("Delete this ATS analysis? This cannot be undone.")) return;
-    setDeletingId(analysisId);
+  async function deleteAnalyses(ids: string[], askForConfirmation = true) {
+    const uniqueIds = [...new Set(ids)].filter((id) => !deletingIds.has(id));
+    if (!uniqueIds.length) return;
+    const confirmation = uniqueIds.length === 1
+      ? "Delete this ATS analysis? This cannot be undone."
+      : `Delete ${uniqueIds.length} ATS analyses? This cannot be undone.`;
+    if (askForConfirmation && !window.confirm(confirmation)) return;
+    const previousRows = analyses.filter((row) => uniqueIds.includes(row.id));
+    setDeletingIds((current) => new Set([...current, ...uniqueIds]));
     setError("");
     setMessage("");
+    setAnalyses((current) => current.filter((row) => !uniqueIds.includes(row.id)));
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      uniqueIds.forEach((id) => next.delete(id));
+      return next;
+    });
+    setMessage(uniqueIds.length === 1 ? "Analysis removed. Syncing deletion…" : `${uniqueIds.length} analyses removed. Syncing deletions…`);
     try {
-      await apiRequest(`/ats-analyses/${analysisId}`, { method: "DELETE" });
-      setAnalyses((current) => current.filter((row) => row.id !== analysisId));
-      setMessage("ATS analysis deleted.");
+      const results = await Promise.allSettled(
+        uniqueIds.map((analysisId) => apiRequest(`/ats-analyses/${analysisId}`, { method: "DELETE" })),
+      );
+      const failedRows = results.flatMap((result, index) =>
+        result.status === "rejected" ? [previousRows.find((row) => row.id === uniqueIds[index])] : [],
+      ).filter((row): row is Analysis => Boolean(row));
+      if (failedRows.length) {
+        setAnalyses((current) => {
+          const byId = new Map(current.map((row) => [row.id, row]));
+          failedRows.forEach((row) => byId.set(row.id, row));
+          return analyses.filter((row) => byId.has(row.id)).map((row) => byId.get(row.id) as Analysis);
+        });
+        setError(`${failedRows.length} deletion${failedRows.length === 1 ? "" : "s"} failed. Affected analyses were restored.`);
+      } else {
+        setMessage(uniqueIds.length === 1 ? "ATS analysis deleted." : `${uniqueIds.length} ATS analyses deleted.`);
+      }
     } catch (reason) {
-      setError((reason as Error).message);
+      setAnalyses((current) => {
+        const byId = new Map(current.map((row) => [row.id, row]));
+        previousRows.forEach((row) => byId.set(row.id, row));
+        return analyses.filter((row) => byId.has(row.id)).map((row) => byId.get(row.id) as Analysis);
+      });
+      setError((reason as Error).message || "Could not delete ATS analyses.");
     } finally {
-      setDeletingId(null);
+      setDeletingIds((current) => {
+        const next = new Set(current);
+        uniqueIds.forEach((id) => next.delete(id));
+        return next;
+      });
     }
   }
 
@@ -620,6 +656,26 @@ function AtsHistoryList() {
           <span className="analysis-overview-label">Needs attention</span>
         </div>
       </div>
+      {analyses.length ? (
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
+          <label className="cluster" style={{ gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={analyses.every((analysis) => selectedIds.has(analysis.id))}
+              onChange={(event) => setSelectedIds(event.target.checked ? new Set(analyses.map((analysis) => analysis.id)) : new Set())}
+              aria-label="Select all ATS analyses"
+            />
+            Select all
+          </label>
+          <Button
+            variant="destructive"
+            disabled={!selectedIds.size || [...selectedIds].some((id) => deletingIds.has(id))}
+            onClick={() => void deleteAnalyses([...selectedIds])}
+          >
+            Delete selected{selectedIds.size ? ` (${selectedIds.size})` : ""}
+          </Button>
+        </div>
+      ) : null}
       {!analyses.length && !error ? (
         <Card className="empty-state">
           <h2>No ATS analyses yet</h2>
@@ -649,6 +705,17 @@ function AtsHistoryList() {
       {analyses.map((analysis) => (
         <Card className="stack" key={analysis.id}>
           <div className="row">
+            <input
+              type="checkbox"
+              checked={selectedIds.has(analysis.id)}
+              onChange={(event) => setSelectedIds((current) => {
+                const next = new Set(current);
+                if (event.target.checked) next.add(analysis.id);
+                else next.delete(analysis.id);
+                return next;
+              })}
+              aria-label={`Select ATS analysis from ${formatDate(analysis.created_at)}`}
+            />
             <div>
               <p className="eyebrow">Previous ATS run</p>
               <h2 style={{ marginBottom: 6 }}>
@@ -686,10 +753,10 @@ function AtsHistoryList() {
             )}
             <Button
               variant="destructive"
-              disabled={deletingId === analysis.id}
-              onClick={() => deleteAnalysis(analysis.id)}
+              disabled={deletingIds.has(analysis.id)}
+              onClick={() => void deleteAnalyses([analysis.id])}
             >
-              {deletingId === analysis.id ? "Deleting…" : "Delete"}
+              {deletingIds.has(analysis.id) ? "Syncing…" : "Delete"}
             </Button>
           </div>
         </Card>
