@@ -13,7 +13,7 @@ import logging
 from app.agents.providers.groq_client import GroqClient
 from app.core.config import Settings
 from app.core.errors import ApiError
-from app.features.document_parsing.service import extract_skill_candidates
+from app.features.document_parsing.service import extract_skill_candidates, skill_source_text
 from app.features.interview.question_bank import has_questions, normalize_skill, questions_for
 
 logger = logging.getLogger(__name__)
@@ -67,11 +67,23 @@ def _section_values(structured: object, names: tuple[str, ...]) -> list[str]:
 def _candidate_skills(resume: dict[str, Any], profile_skills: list[dict[str, Any]]) -> list[str]:
     explicit = [row.get("name") or row.get("normalized_name") for row in profile_skills]
     structured = _section_values(resume.get("structured_content"), ("skill", "technolog", "tool"))
-    plain = extract_skill_candidates(str(resume.get("plain_text") or ""))
+    sections = (resume.get("structured_content") or {}).get("sections") if isinstance(resume.get("structured_content"), dict) else {}
+    if not isinstance(sections, dict):
+        sections = {}
+    skill_blob, from_skills_section = skill_source_text(
+        plain_text=str(resume.get("plain_text") or ""),
+        sections=sections,
+    )
+    plain = extract_skill_candidates(
+        skill_blob,
+        limit=40,
+        allow_bare_short_lines=from_skills_section or bool(structured),
+    )
     return _unique([*explicit, *structured, *plain])
 def _job_terms(job: dict[str, Any]) -> list[str]:
     structured = _section_values(job.get("structured_content"), ("requirement", "qualification", "skill", "technolog", "tool"))
-    plain = extract_skill_candidates(str(job.get("raw_text") or ""))
+    # Prefer list/label-style extraction — never bare short-line sweeps of the whole JD.
+    plain = extract_skill_candidates(str(job.get("raw_text") or ""), limit=40, allow_bare_short_lines=False)
     return _unique([*structured, *plain])
 def _question(question: str, skill: str | None, difficulty: str | None, source: str) -> dict[str, Any]:
     return {

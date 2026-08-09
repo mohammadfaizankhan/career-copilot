@@ -4,7 +4,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.features.document_parsing.service import extract_sections, extract_skill_candidates
+from app.features.document_parsing.parsing.sections import canonicalize_sections
+from app.features.document_parsing.service import extract_sections, extract_skill_candidates, skill_source_text
 from app.features.profile.agent.normalize import (
     extract_explicit_years,
     infer_career_level,
@@ -305,12 +306,14 @@ def build_profile_draft(
 ) -> dict[str, Any]:
     text = plain_text or ""
     structured = structured_content if isinstance(structured_content, dict) else {}
-    sections = structured.get("sections") if isinstance(structured.get("sections"), dict) else None
-    if not sections:
-        sections = extract_sections(text).get("sections") or {}
-    unclassified = structured.get("unclassified_blocks") or []
-    if not unclassified:
-        unclassified = extract_sections(text).get("unclassified_blocks") or []
+    raw_sections = structured.get("sections") if isinstance(structured.get("sections"), dict) else None
+    if not raw_sections:
+        fallback = extract_sections(text)
+        sections = canonicalize_sections(fallback.get("sections") if isinstance(fallback, dict) else None)
+        unclassified = list((fallback or {}).get("unclassified_blocks") or [])
+    else:
+        sections = canonicalize_sections(raw_sections)
+        unclassified = list(structured.get("unclassified_blocks") or [])
     contact_lines = _section_lines(sections, "contact")
     summary_lines = _section_lines(sections, "summary")
     skill_lines = _section_lines(sections, "skills")
@@ -383,35 +386,26 @@ def build_profile_draft(
             parsed = _parse_language_line(line)
             if parsed:
                 languages.append(parsed)
+    # Skills only from skill sections + labeled skill lines (never whole-doc short lines).
+    skill_blob, from_skills_section = skill_source_text(plain_text=text, sections=sections)
+    if skill_lines and skill_blob:
+        # Ensure explicit skills-section lines are included even if keys already canonicalized.
+        skill_blob = "\n".join([*skill_lines, skill_blob])
+    elif skill_lines:
+        skill_blob = "\n".join(skill_lines)
+        from_skills_section = True
     skill_names: list[str] = []
     seen_skills: set[str] = set()
-    for line in skill_lines:
-        payload = line
-        if ":" in line:
-            left, right = line.split(":", 1)
-            if len(left.strip()) <= 40 and not re.search(r"\d", left):
-                payload = right
-        chunks = re.split(r"[,;|/]|·", payload)
-        for chunk in chunks:
-            name = _clean(chunk, 80)
-            if not name or len(name) < 2:
-                continue
-            if re.fullmatch(
-                r"languages?|frameworks?|tools?|cloud(?:\s*&\s*tools)?|technologies|skills?",
-                name,
-                re.I,
-            ):
-                continue
-            key = name.lower()
-            if key in seen_skills:
-                continue
-            seen_skills.add(key)
-            skill_names.append(name)
-    for skill in extract_skill_candidates(text, limit=30):
+    for skill in extract_skill_candidates(
+        skill_blob,
+        limit=40,
+        allow_bare_short_lines=from_skills_section or bool(skill_lines),
+    ):
         key = skill.lower()
-        if key not in seen_skills:
-            seen_skills.add(key)
-            skill_names.append(skill)
+        if key in seen_skills:
+            continue
+        seen_skills.add(key)
+        skill_names.append(skill)
     skills = [{"name": name, "source": "resume_import", "selected": True} for name in skill_names[:40]]
     links: list[dict[str, Any]] = []
     seen_urls: set[str] = set()

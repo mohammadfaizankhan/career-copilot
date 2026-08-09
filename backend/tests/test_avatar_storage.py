@@ -56,10 +56,15 @@ class AvatarStorageTests(unittest.TestCase):
         )
         self.assertIsNotNone(enriched)
         self.assertEqual(enriched["avatar_path"], avatar_path)
-        self.assertEqual(
-            enriched["avatar_url"],
-            "http://localhost:8000/api/v1/files/test-avatars/candidate-1/avatars/avatar.jpg",
+        url = enriched["avatar_url"] or ""
+        self.assertTrue(
+            url.startswith(
+                "http://localhost:8000/api/v1/files/test-avatars/candidate-1/avatars/avatar.jpg"
+            ),
+            url,
         )
+        # Producer must attach a path-scoped token so <img src> can load without Bearer.
+        self.assertIn("token=", url)
 
 
 if __name__ == "__main__":

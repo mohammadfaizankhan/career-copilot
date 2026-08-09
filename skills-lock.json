@@ -85,6 +85,12 @@
       "skillPath": ".github/skills/fix-errors/SKILL.md",
       "computedHash": "356d24d2637dd0db3a783381929755dcf7ae563564cd62032bbc0a6d69eb404c"
     },
+    "ppt-visual": {
+      "source": "claude-office-skills/skills",
+      "sourceType": "github",
+      "skillPath": "ppt-visual/SKILL.md",
+      "computedHash": "5c704bd492e0960d168f4bb2073700e5a0609211db273c89739970b041d53919"
+    },
     "xcode-project-setup": {
       "source": "firebase/agent-skills",
       "sourceType": "github",

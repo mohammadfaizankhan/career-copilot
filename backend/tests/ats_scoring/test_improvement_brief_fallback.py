@@ -1,9 +1,4 @@
-"""ATS improvement brief must never fail the scoring path when AI is down.
-
-POST /ats-analyses treats the brief as optional enrichment; if NVIDIA times out
-or returns nvidia_unavailable, callers must still get a deterministic brief
-instead of a 500 "could not be persisted".
-"""
+"""The ATS score persists when AI is down, but the narrative must remain LLM-only."""
 
 from __future__ import annotations
 
@@ -45,7 +40,7 @@ async def _call_brief(settings):
     )
 
 
-def test_ats_brief_falls_back_when_nvidia_unavailable(monkeypatch):
+def test_ats_brief_reports_unavailable_when_nvidia_unavailable(monkeypatch):
     async def unavailable(*_args, **_kwargs):
         raise ApiError(503, "nvidia_unavailable", "provider unavailable")
 
@@ -53,10 +48,11 @@ def test_ats_brief_falls_back_when_nvidia_unavailable(monkeypatch):
 
     result = asyncio.run(_call_brief(_settings()))
 
-    assert result["fallback"] is True
-    assert result["provider"] == "deterministic"
-    assert "Python" in result["overall_inference"]
-    assert result["focus_areas"]
+    assert result["fallback"] is False
+    assert result["provider"] == "unavailable"
+    assert result["report_status"] == "unavailable"
+    assert result["overall_inference"] is None
+    assert result["focus_areas"] == []
 
 
 def test_ats_brief_falls_back_to_groq_when_nvidia_unavailable(monkeypatch):
@@ -134,8 +130,9 @@ def test_ats_brief_does_not_wait_for_slow_nvidia(monkeypatch):
     elapsed = time.perf_counter() - started
 
     assert elapsed < 2.0, f"optional brief blocked for {elapsed:.1f}s"
-    assert result["fallback"] is True
-    assert result["provider"] == "deterministic"
+    assert result["fallback"] is False
+    assert result["provider"] == "unavailable"
+    assert result["report_status"] == "unavailable"
 
 
 def test_ats_brief_caps_long_provider_timeout(monkeypatch):
@@ -152,5 +149,79 @@ def test_ats_brief_caps_long_provider_timeout(monkeypatch):
     elapsed = time.perf_counter() - started
 
     assert elapsed < 2.0, f"optional brief blocked for {elapsed:.1f}s (cap should clamp provider timeout)"
-    assert result["fallback"] is True
-    assert result["provider"] == "deterministic"
+    assert result["fallback"] is False
+    assert result["provider"] == "unavailable"
+    assert result["report_status"] == "unavailable"
+
+
+def test_domain_gate_returns_structured_llm_rejection(monkeypatch):
+    class GateResult:
+        decision = "REJECT"
+        resume_domain = "software engineering"
+        job_domain = "medical practice"
+        role_family = "physician"
+        reason = "The resume documents software projects, while the JD requires clinical practice credentials."
+
+    async def reject(*_args, **_kwargs):
+        return GateResult()
+
+    monkeypatch.setattr(ib.NvidiaClient, "generate_structured", reject)
+    result = asyncio.run(
+        ib.evaluate_ats_domain_gate(
+            _settings(),
+            resume_text="Software engineer with Python projects",
+            job_description="Medical doctor with clinical licensing",
+            generation_id="run-1",
+        )
+    )
+    assert result["decision"] == "REJECT"
+    assert result["status"] == "generated"
+    assert result["generation_id"] == "run-1"
+    assert "clinical" in result["reason"]
+
+
+def test_domain_gate_never_hardcodes_rejection_when_llm_unavailable(monkeypatch):
+    async def unavailable(*_args, **_kwargs):
+        raise ApiError(503, "nvidia_unavailable", "provider unavailable")
+
+    monkeypatch.setattr(ib.NvidiaClient, "generate_structured", unavailable)
+    result = asyncio.run(
+        ib.evaluate_ats_domain_gate(
+            _settings(),
+            resume_text="Software engineer",
+            job_description="Medical doctor",
+        )
+    )
+    assert result["decision"] == "UNVERIFIED"
+    assert result["status"] == "unavailable"
+
+
+def test_llm_brief_receives_analysis_specific_generation_id(monkeypatch):
+    captured = {}
+
+    class GroqResult:
+        overall_inference = "The supplied evidence supports a focused review of Python."
+        focus_areas = ["Python"]
+        priority_actions = ["Review Python evidence before editing the resume."]
+        section_guidance = ["Python belongs in the skills section when supported."]
+        do_not_claim = ["Do not invent experience."]
+
+    async def groq_ok(*_args, **kwargs):
+        captured.update(kwargs.get("user_payload") or {})
+        return GroqResult()
+
+    monkeypatch.setattr(ib.GroqClient, "generate_structured", groq_ok)
+    result = asyncio.run(
+        ib.generate_ats_improvement_brief(
+            _settings(llm_provider="groq", groq_configured=True),
+            overall_score=50.0,
+            missing_terms=["Python"],
+            matched_count=1,
+            total_terms=2,
+            missing_items=[{"term": "Python", "priority": "critical", "suggested_section": "skills"}],
+            generation_id="analysis-unique-1",
+        )
+    )
+    assert captured["generation_id"] == "analysis-unique-1"
+    assert result["report_status"] == "generated"
+    assert result["generation_id"] == "analysis-unique-1"

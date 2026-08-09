@@ -62,6 +62,52 @@ def test_skill_candidates_are_source_derived_not_allowlisted() -> None:
     assert "python" not in joined
 
 
+def test_skill_candidates_ignore_bare_short_lines_outside_skills_scope() -> None:
+    text = """
+Priyansu Candidate
+Maharashtra
+PGCP-AI
+Feb26
+612
+Duration : 1 Month
+Technologies used: FastAPI, React, PostgreSQL
+"""
+    found = extract_skill_candidates(text, limit=30, allow_bare_short_lines=False)
+    joined = " ".join(found).casefold()
+    assert "fastapi" in joined
+    assert "react" in joined
+    assert "postgresql" in joined
+    for junk in ("maharashtra", "pgcp-ai", "feb26", "612", "duration"):
+        assert junk not in joined
+
+
+def test_skill_candidates_allow_bare_lines_only_when_scoped() -> None:
+    section_text = "Python\nFastAPI\nDocker"
+    found = extract_skill_candidates(section_text, limit=20, allow_bare_short_lines=True)
+    joined = " ".join(found).casefold()
+    assert "python" in joined
+    assert "fastapi" in joined
+    assert "docker" in joined
+
+
+def test_clean_structured_canonicalizes_section_keys() -> None:
+    result = _clean_structured(
+        {
+            "sections": {
+                "academic_projects": ["Career Gap Detection"],
+                "technical_skills": ["Python, FastAPI"],
+                "technical_certification": ["AWS Cloud Practitioner"],
+            }
+        },
+        "resume-extraction-v1",
+    )
+    keys = set(result["sections"])
+    assert "projects" in keys
+    assert "skills" in keys
+    assert "certifications" in keys
+    assert "academic_projects" not in keys
+
+
 def test_clean_structured_preserves_source_urls_in_links_section() -> None:
     result = _clean_structured(
         {

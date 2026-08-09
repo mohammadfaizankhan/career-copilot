@@ -48,6 +48,18 @@ def clean_skill_name(value: str | None) -> str | None:
         return None
     if text.endswith(":"):
         return None
+    # Shape-based rejects (not a technology allowlist).
+    if "@" in text or re.fullmatch(r"\d+", text):
+        return None
+    if re.fullmatch(r"(?:19|20)\d{2}\s*[-–—]\s*(?:19|20)\d{2}", text):
+        return None
+    if re.fullmatch(
+        r"duration\s*[:\-–—]?\s*.*|"
+        r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*'?\d{2,4}",
+        text,
+        re.I,
+    ):
+        return None
     return text
 def clean_phone(value: str | None) -> str | None:
     if not value:

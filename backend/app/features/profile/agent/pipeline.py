@@ -213,11 +213,15 @@ def merge_profile_drafts(
                     seen.add(k)
             return merged
         return list(base_rows)
-    skills = _merge_list(
-        filtered_ai.get("skills") or [],
-        base.get("skills") or [],
-        lambda r: _norm(str(r.get("name") or "")),
-    )
+    # Prefer AI skills when present. Deterministic whole-doc heuristics are noisy;
+    # unioning them pollutes profiles (and downstream ATS / skill import) with
+    # short non-skill fragments. Fall back to deterministic only if AI found none.
+    ai_skills = filtered_ai.get("skills") or []
+    base_skills = base.get("skills") or []
+    if ai_skills:
+        skills = list(ai_skills)
+    else:
+        skills = list(base_skills)
     ai_experiences = filtered_ai.get("experiences") or []
     base_experiences = base.get("experiences") or []
     base_by_key = {

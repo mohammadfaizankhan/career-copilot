@@ -178,3 +178,47 @@ def test_dotnet_token_keeps_leading_dot_and_aliases() -> None:
     found = set(result.matched_terms) | set(result.partial_terms or [])
     assert ".net" in found
     assert "c#" in found
+
+
+def test_jd_extractor_does_not_score_responsibility_verbs_as_skills() -> None:
+    jd = """
+    Preferred Qualifications
+    Experience with NLP, BERT, GPT, Computer Vision, YOLO, OpenCV.
+    Knowledge of AWS, GCP, Azure, Docker, Kubernetes.
+    Exposure to MLOps practices (CI/CD, model monitoring, versioning).
+    Key Responsibilities
+    Study and transform data science prototypes into production-ready ML models.
+    Run ML tests and experiments, documenting findings and results.
+    Train, retrain, and monitor deployed ML systems.
+    Extend and optimize existing ML frameworks.
+    Required Skills Qualifications
+    Proficiency in Python and ML frameworks such as PyTorch TensorFlow.
+    Keras.
+    """
+    terms = {term for term, _ in _candidate_terms(jd)}
+    assert {"machine learning", "python", "pytorch", "tensorflow", "keras", "nlp", "bert", "yolo", "opencv", "ci/cd"} <= terms
+    assert not {"study", "train", "extend", "run ml tests", "containerization docker", "proficiency in python"} & terms
+
+
+def test_platform_project_evidence_is_strong() -> None:
+    result = score_resume(
+        "Title: Career Copilot\nPlatform: Python, FastAPI, LLM, RAG",
+        "Required skills: Python, FastAPI, LLM, RAG",
+    )
+    assert result.overall_score == 100.0
+    assert set(result.matched_terms) >= {"python", "fastapi", "llm", "rag"}
+    assert all(item.match_strength == "strong" for item in result.evidence)
+
+
+def test_jd_parser_splits_alternatives_and_drops_section_labels() -> None:
+    terms = {term for term, _ in _candidate_terms("""
+        Preferred / Nice-to-Have
+        Practical experience with deep learning frameworks: PyTorch or TensorFlow.
+        Exposure to MLOps basics: model versioning, experiment tracking, CI/CD for ML.
+        What the company offers
+        Competitive compensation and benefits.
+    """)}
+    assert {"deep learning", "pytorch", "tensorflow", "model monitoring", "ci/cd", "mlops"} & terms
+    assert "nice-to-have" not in terms
+    assert "what the company offers" not in terms
+    assert "pytorch or tensorflow" not in terms

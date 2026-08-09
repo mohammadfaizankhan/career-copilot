@@ -60,9 +60,13 @@ def candidate_skill_evidence(client, user_id: str, resume: dict[str, Any], versi
     structured = version.get("structured_content") or {}
     sections = structured.get("sections") if isinstance(structured, dict) else {}
     skill_lines = []
+    # Match skill-ish section keys (skills, technologies, tech_stack, tools, …),
+    # not only keys that literally contain the substring "skill".
+    _skillish = ("skill", "technolog", "competenc", "tool", "stack")
     if isinstance(sections, dict):
         for key, value in sections.items():
-            if "skill" in str(key).lower():
+            key_l = str(key).lower()
+            if any(hint in key_l for hint in _skillish):
                 skill_lines.append(_text(value))
     resume_text = _text(version.get("plain_text")) or _text(resume.get("plain_text"))
     evidence_text = " ".join([resume_text, *skill_lines])

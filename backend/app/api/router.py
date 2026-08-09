@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, File, Form, Header, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, Header, Query, UploadFile
 from fastapi.responses import JSONResponse, Response as PlainResponse
 
 from app.agents.registry import agents_status
@@ -48,7 +48,7 @@ from app.database.repository import (
     sort_rows_by_recency,
     write_activity,
 )
-from app.features.ats.agents import generate_ats_improvement_brief
+from app.features.ats.agents import evaluate_ats_domain_gate, generate_ats_improvement_brief
 from app.features.ats.ats_score import (
     ALGORITHM_VERSION,
     ats_source_fingerprint,
@@ -62,7 +62,12 @@ from app.features.auth.account_deletion import (
     email_matches_account,
     purge_user_storage,
 )
-from app.features.auth.service import CurrentUser, get_current_user
+from app.features.auth.service import (
+    CurrentUser,
+    get_current_user,
+    get_current_user_optional,
+    parse_file_access_token,
+)
 from app.features.career_matching import (
     ALGORITHM_VERSION as CAREER_MATCH_ALGORITHM_VERSION,
 )
@@ -80,6 +85,7 @@ from app.features.document_parsing.service import (
     infer_resume_title,
     safe_filename,
     sha256_bytes,
+    skill_source_text,
     validate_document,
 )
 from app.features.interview.agent import (
@@ -207,15 +213,37 @@ def health_database(settings: Settings = Depends(get_settings)) -> dict[str, Any
 
 
 @router.get("/files/{bucket}/{path:path}")
-def authenticated_file(
+async def authenticated_file(
     bucket: str,
     path: str,
-    user: CurrentUser = Depends(get_current_user),
+    token: str | None = Query(default=None, description="Path-scoped file access token for <img> loads"),
+    user: CurrentUser | None = Depends(get_current_user_optional),
     settings: Settings = Depends(get_settings),
 ):
-    """Stream a user-owned object from configured object storage after JWT ownership checks."""
+    """Stream a user-owned object after ownership checks.
+
+    Auth sources (first match wins):
+    1. Bearer / session cookie (API fetches)
+    2. ``token`` query param — short-lived path-scoped JWT for browser subresources
+       (``<img src>`` cannot send Authorization headers)
+    """
     allowed = {settings.document_bucket, settings.avatar_bucket}
-    if bucket not in allowed or not path.startswith(f"{user.id}/"):
+    if bucket not in allowed:
+        raise ApiError(404, "file_not_found", "The requested file was not found.")
+
+    if user is not None:
+        owner_id = str(user.id)
+    elif token:
+        owner_uuid = parse_file_access_token(token, settings, bucket=bucket, path=path)
+        owner_id = str(owner_uuid)
+    else:
+        raise ApiError(
+            401,
+            "authentication_required",
+            "Authentication is required to access this file.",
+        )
+
+    if not path.startswith(f"{owner_id}/"):
         raise ApiError(404, "file_not_found", "The requested file was not found.")
     try:
         content = database_client(settings).storage.from_(bucket).download(path)
@@ -224,7 +252,14 @@ def authenticated_file(
     except Exception as exc:
         raise ApiError(503, "storage_unavailable", "Object storage is temporarily unavailable.") from exc
     media_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
-    return PlainResponse(content=content, media_type=media_type)
+    return PlainResponse(
+        content=content,
+        media_type=media_type,
+        headers={
+            # Avatars are private; discourage long-lived shared caches of tokenized URLs.
+            "Cache-Control": "private, max-age=300",
+        },
+    )
 
 
 @router.get("/me/bootstrap")
@@ -896,7 +931,9 @@ async def upload_profile_avatar(
     return {
         "profile": attach_avatar_url(profile, client, settings),
         "avatar_path": new_path,
-        "avatar_url": signed_avatar_url(client, settings, new_path),
+        "avatar_url": signed_avatar_url(
+            client, settings, new_path, user_id=str(user.id)
+        ),
         "max_bytes": settings.avatar_max_bytes,
         "expires_in": settings.export_signed_url_seconds,
     }
@@ -972,12 +1009,16 @@ def import_skills_from_resume(
     if not versions:
         raise ApiError(404, "confirmed_resume_required", "Confirm a resume before importing skills.")
     version = versions[0]
-    text_parts = [version.get("plain_text") or ""]
+    plain_text = version.get("plain_text") or ""
     sections = (version.get("structured_content") or {}).get("sections") or {}
-    for lines in sections.values():
-        if isinstance(lines, list):
-            text_parts.extend(str(line) for line in lines)
-    candidates = extract_skill_candidates("\n".join(text_parts))
+    if not isinstance(sections, dict):
+        sections = {}
+    skill_blob, from_skills_section = skill_source_text(plain_text=plain_text, sections=sections)
+    candidates = extract_skill_candidates(
+        skill_blob,
+        limit=40,
+        allow_bare_short_lines=from_skills_section,
+    )
     existing = {
         str(row.get("normalized_name") or "").lower()
         for row in owned_rows(client, "candidate_skills", user)
@@ -2413,12 +2454,21 @@ async def create_ats(
 
     # Single scoring path: deterministic keyword coverage only.
     # Source = JD requirement text. Evidence = exact resume quote or null.
+    # Domain compatibility is a separate LLM gate; an unavailable gate is
+    # explicitly unverified and must not silently reject or approve the run.
+    domain_gate = await evaluate_ats_domain_gate(
+        settings,
+        resume_text=version.get("plain_text") or "",
+        job_description=job.get("raw_text") or "",
+        generation_id=source_fp,
+    )
     scoring_method = "Evidence-backed keyword coverage"
-    persisted_score = score.overall_score
+    persisted_score = 0.0 if domain_gate.get("decision") == "REJECT" else score.overall_score
     score_breakdown = {
         **score.breakdown,
         "method": scoring_method,
         "source_fingerprint": source_fp,
+        "domain_gate": domain_gate,
     }
     missing_items = [
         {
@@ -2502,8 +2552,9 @@ async def create_ats(
             missing_items=missing_items,
             matched_items=matched_items,
             structured_parameter_scores=None,
-            domain_gate=None,
+            domain_gate=domain_gate,
             resume_section_summary=score.section_summary,
+            generation_id=str(analysis.get("id")),
         )
 
         completed_rows = (
@@ -2533,6 +2584,7 @@ async def create_ats(
                         "required_score": score.required_score,
                         "preferred_score": score.preferred_score,
                         "section_summary": score.section_summary or {},
+                        "domain_gate": domain_gate,
                         "overall_inference": brief.get("overall_inference"),
                         "focus_areas": brief.get("focus_areas") or [],
                         "priority_actions": brief.get("priority_actions") or [],
@@ -2540,9 +2592,11 @@ async def create_ats(
                         "do_not_claim": brief.get("do_not_claim") or [],
                         "inference_provider": brief.get("provider"),
                         "inference_model": brief.get("model"),
+                        "report_status": brief.get("report_status", "unavailable"),
+                        "report_generation_id": brief.get("generation_id"),
                         "disclaimer": (
-                            "Score is keyword coverage only: each hit quotes an exact resume line. "
-                            "Not a hiring prediction. Never add experience that is not in the resume."
+                            "The score is evidence-backed keyword coverage. The narrative report is LLM-generated only. "
+                            "This is not a hiring prediction; never add experience that is not in the resume."
                         ),
                     },
                     "completed_at": utc_now(),
@@ -3629,6 +3683,9 @@ def sync_external_jobs(
                 "longitude": job.get("longitude"),
                 "is_active": True,
                 "requirements": job.get("requirements") or [],
+                # Persist Adzuna-inferred mode so generate filters + UI cards stay in sync
+                # without re-deriving from free text on every request.
+                "work_mode": job.get("work_mode"),
                 "updated_at": stamp,
             }
             existing_id = existing_by_external.get(external_id)

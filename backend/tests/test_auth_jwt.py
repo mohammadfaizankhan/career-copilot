@@ -8,7 +8,12 @@ import pytest
 
 from app.core.constants import JWT_ALGORITHM
 from app.core.errors import ApiError
-from app.features.auth.service import _user_from_token, create_access_token
+from app.features.auth.service import (
+    _user_from_token,
+    create_access_token,
+    create_file_access_token,
+    parse_file_access_token,
+)
 
 
 class _Settings:
@@ -66,3 +71,30 @@ def test_token_without_exp_is_rejected():
     with pytest.raises(ApiError) as exc:
         _user_from_token(token, settings)  # type: ignore[arg-type]
     assert exc.value.status_code == 401
+
+
+def test_file_access_token_is_path_scoped():
+    settings = _Settings()
+    user_id = uuid4()
+    token = create_file_access_token(
+        user_id=user_id,
+        bucket="candidate-avatars",
+        path=f"{user_id}/avatars/a.jpg",
+        settings=settings,  # type: ignore[arg-type]
+        expires_seconds=120,
+    )
+    parsed = parse_file_access_token(
+        token,
+        settings,  # type: ignore[arg-type]
+        bucket="candidate-avatars",
+        path=f"{user_id}/avatars/a.jpg",
+    )
+    assert parsed == user_id
+    with pytest.raises(ApiError) as exc:
+        parse_file_access_token(
+            token,
+            settings,  # type: ignore[arg-type]
+            bucket="candidate-avatars",
+            path=f"{user_id}/avatars/other.jpg",
+        )
+    assert exc.value.code == "invalid_file_token"

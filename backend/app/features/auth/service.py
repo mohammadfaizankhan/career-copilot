@@ -33,6 +33,9 @@ def parse_bearer_header(value: str | None) -> str:
     return token.strip()
 
 
+FILE_READ_SCOPE = "file_read"
+
+
 def create_access_token(user_id: UUID, email: str, settings: Settings, token_version: int = 0) -> str:
     now = datetime.now(UTC)
     ttl_seconds = max(60, int(getattr(settings, "jwt_ttl_seconds", 60 * 60 * 24 * 7)))
@@ -44,6 +47,61 @@ def create_access_token(user_id: UUID, email: str, settings: Settings, token_ver
         "ver": int(token_version),
     }
     return jwt.encode(payload, settings.auth_secret, algorithm=JWT_ALGORITHM)
+
+
+def create_file_access_token(
+    *,
+    user_id: UUID | str,
+    bucket: str,
+    path: str,
+    settings: Settings,
+    expires_seconds: int | None = None,
+) -> str:
+    """Short-lived, path-scoped token so <img src> can load private files without Authorization.
+
+    Browser image tags cannot send Bearer headers. Session cookies often fail when the
+    API origin differs from the frontend origin (port/host). A scoped query token is the
+    correct producer fix for avatar_url / file URLs used as subresources.
+    """
+    now = datetime.now(UTC)
+    ttl = max(30, int(expires_seconds or getattr(settings, "export_signed_url_seconds", 300)))
+    payload = {
+        "sub": str(user_id),
+        "bucket": str(bucket),
+        "path": str(path),
+        "scope": FILE_READ_SCOPE,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(seconds=ttl)).timestamp()),
+    }
+    return jwt.encode(payload, settings.auth_secret, algorithm=JWT_ALGORITHM)
+
+
+def parse_file_access_token(
+    token: str,
+    settings: Settings,
+    *,
+    bucket: str,
+    path: str,
+) -> UUID:
+    try:
+        payload = jwt.decode(
+            token,
+            settings.auth_secret,
+            algorithms=[JWT_ALGORITHM],
+            options={"require": ["sub", "exp", "iat", "scope", "bucket", "path"]},
+        )
+    except jwt.ExpiredSignatureError as exc:
+        raise ApiError(401, "file_token_expired", "The file access link has expired. Refresh the page.") from exc
+    except jwt.PyJWTError as exc:
+        raise ApiError(401, "invalid_file_token", "The file access link is invalid.") from exc
+    if payload.get("scope") != FILE_READ_SCOPE:
+        raise ApiError(401, "invalid_file_token", "The file access link is invalid.")
+    if str(payload.get("bucket") or "") != str(bucket) or str(payload.get("path") or "") != str(path):
+        raise ApiError(401, "invalid_file_token", "The file access link does not match this file.")
+    try:
+        return UUID(str(payload["sub"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ApiError(401, "invalid_file_token", "The file access link is invalid.") from exc
 
 
 def _user_from_token(token: str, settings: Settings) -> CurrentUser:
@@ -91,4 +149,19 @@ async def get_current_user(
         raise ApiError(401, "authentication_required", "Authentication is required.")
     # Firestore identity verification is synchronous network I/O. Keep it off
     # the async event loop so auth/session cannot stall unrelated requests.
+    return await asyncio.to_thread(_user_from_token, token, settings)
+
+
+async def get_current_user_optional(
+    authorization: str | None = Header(default=None),
+    career_copilot_session: str | None = Cookie(default=None),
+    settings: Settings = Depends(get_settings),
+) -> CurrentUser | None:
+    """Like get_current_user but returns None when no session is presented."""
+    if authorization:
+        token = parse_bearer_header(authorization)
+    else:
+        token = career_copilot_session
+    if not token:
+        return None
     return await asyncio.to_thread(_user_from_token, token, settings)

@@ -107,6 +107,7 @@ def test_sync_external_jobs_persists_new_and_updates(monkeypatch):
             "latitude": 1.0,
             "longitude": 2.0,
             "requirements": [],
+            "work_mode": "remote",
         },
         {
             "source": "adzuna",
@@ -122,6 +123,7 @@ def test_sync_external_jobs_persists_new_and_updates(monkeypatch):
             "latitude": None,
             "longitude": None,
             "requirements": [],
+            "work_mode": "hybrid",
         },
     ]
 
@@ -137,3 +139,8 @@ def test_sync_external_jobs_persists_new_and_updates(monkeypatch):
     assert result["updated"] == 1
     assert jobs_table.insert.called
     assert jobs_table.update.called
+    # work_mode must be written so generate filters and UI stay synced with Adzuna.
+    insert_payload = jobs_table.insert.call_args[0][0]
+    assert insert_payload.get("work_mode") == "remote"
+    update_payload = jobs_table.update.call_args[0][0]
+    assert update_payload.get("work_mode") == "hybrid"

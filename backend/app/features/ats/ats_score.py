@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-ALGORITHM_VERSION = "evidence-keyword-coverage-v4"
+ALGORITHM_VERSION = "evidence-keyword-coverage-v6-nemotron"
 EVIDENCE_MATCH_STATUS = {
     "strong": "strong_match",
     "partial": "partial_match",
@@ -28,6 +28,7 @@ STOP_WORDS = {
     "work", "years", "you", "your", "will", "within", "ability", "looking", "join",
     "etc", "such", "well", "good", "plus", "we", "a", "an", "be", "can", "could",
     "would", "person", "people", "value", "collaborative", "motivated", "passionate",
+    "proficiency", "nice-to-have", "nice to have",
 }
 # Section-label patterns only — bare substring markers (e.g. "bonus" in "bonus culture")
 # must not flip weight for following requirement lines.
@@ -41,7 +42,11 @@ REQUIRED_SECTION_RE = re.compile(
 # Exit multi-line requirement blocks when these non-skill sections begin.
 JD_SECTION_EXIT_RE = re.compile(
     r"(?i)^\s*(?:about\s+(?:us|the\s+company)|benefits|what\s+we\s+offer|culture|"
-    r"equal\s+opportunity|how\s+to\s+apply|location|compensation|salary)\b"
+    r"equal\s+opportunity|how\s+to\s+apply|location|compensation|salary|"
+    r"objectives?\s+of\s+the\s+role|key\s+responsibilities|responsibilities)\b"
+)
+JD_SIGNAL_SECTION_RE = re.compile(
+    r"(?i)^\s*(?:objectives?\s+of\s+the\s+role|key\s+responsibilities|responsibilities)\b"
 )
 PREFERRED_MARKERS = ("preferred", "nice to have", "nice-to-have", "desired")
 REQUIRED_MARKERS = ("required", "must have", "must-have", "minimum", "qualifications")
@@ -72,6 +77,10 @@ KNOWN_TECH_TERMS = {
     "angular", "vue", "spring", "git", "github", "gitlab", "linux", "terraform", "jenkins",
     "figma", "pandas", "numpy", "pytorch", "tensorflow", "spark", "hadoop", "airflow",
     "snowflake", "databricks", "tableau", "power bi", "excel", "selenium", "playwright",
+    "ml", "deep learning", "nlp", "bert", "gpt", "computer vision", "opencv", "yolo", "mlops",
+    "scikit-learn", "keras", "data science", "data structures", "data modeling", "model monitoring",
+    "llm fine-tuning", "langchain", "langgraph", "vector database", "chroma", "faiss", "pinecone",
+    "streamlit", "sqlalchemy", "openai", "aws sagemaker", "azure openai", "bedrock",
 }
 RELEVANT_LINE_MARKERS = (
     "required", "must have", "qualifications", "requirements", "skills", "technologies",
@@ -219,7 +228,7 @@ def _split_requirement_chunks(payload: str) -> list[str]:
     """
     chunks: list[str] = []
     # Do not split on '.' so Node.js / Next.js stay intact.
-    for part in re.split(r"[,;|\u2022]|\s+and\s+", payload or "", flags=re.IGNORECASE):
+    for part in re.split(r"[,;|\u2022]|\s+(?:and|or)\s+", payload or "", flags=re.IGNORECASE):
         cleaned = part.strip()
         if not cleaned:
             continue
@@ -426,6 +435,7 @@ def _candidate_terms(text: str, limit: int = 80) -> list[tuple[str, str]]:
     # When True, following plain (non-bullet) lines still yield known tech terms
     # until a non-skill section header ends the block.
     in_req_block = False
+    allow_freeform = False
     known = set(ALIAS_GROUPS) | KNOWN_TECH_TERMS
 
     def add(value: str, kind: str) -> None:
@@ -452,8 +462,14 @@ def _candidate_terms(text: str, limit: int = 80) -> list[tuple[str, str]]:
     def add_known_terms(line: str, kind: str) -> None:
         normalized_line = _normalize(line)
         for term in sorted(known, key=len, reverse=True):
-            normalized_term = _normalize(term)
-            if re.search(_term_boundary_pattern(normalized_term), normalized_line):
+            surfaces = (_normalize(term),) + tuple(
+                _normalize(alias) for alias in ALIAS_GROUPS.get(term, ())
+            )
+            if any(
+                re.search(_term_boundary_pattern(surface), normalized_line)
+                for surface in surfaces
+                if surface
+            ):
                 add(term, kind)
 
     for raw in (text or "").splitlines() or [text]:
@@ -461,8 +477,23 @@ def _candidate_terms(text: str, limit: int = 80) -> list[tuple[str, str]]:
         if not line:
             continue
         if JD_SECTION_EXIT_RE.match(line):
-            in_req_block = False
-            continue
+            if JD_SIGNAL_SECTION_RE.match(line):
+                # Responsibilities/objectives can contain real technical signals,
+                # but their prose must not become one requirement per verb phrase.
+                in_req_block = True
+                allow_freeform = False
+                current_type = "required"
+            else:
+                in_req_block = False
+                allow_freeform = False
+                continue
+        if re.match(
+            r"(?i)^\s*(?:required|preferred|qualifications|requirements|skills|"
+            r"must\s*have|nice\s*to\s*have)\b",
+            line,
+        ):
+            in_req_block = True
+            allow_freeform = True
         segments = re.split(
             r"(?i)(?=\b(?:preferred|nice to have|nice-to-have|desired)\s*:)",
             line,
@@ -509,9 +540,12 @@ def _candidate_terms(text: str, limit: int = 80) -> list[tuple[str, str]]:
                 if any(word in STOP_WORDS for word in words if word not in SHORT_TECH_TERMS):
                     continue
                 normalized = _normalize(cleaned)
-                if normalized in known or any(
-                    re.search(_term_boundary_pattern(_normalize(term)), normalized) for term in known
+                if any(
+                    f"/{normalized}" in known_term or f"{normalized}/" in known_term
+                    for known_term in known
                 ):
+                    continue
+                if normalized in known:
                     add(cleaned, segment_type)
                     continue
                 original_words = [match.group(0) for match in TOKEN_PATTERN.finditer(cleaned)]
@@ -521,7 +555,7 @@ def _candidate_terms(text: str, limit: int = 80) -> list[tuple[str, str]]:
                     or (word.startswith(".") and len(word) > 1 and word[1:2].isalpha())
                     for word in original_words
                 )
-                if technical_shape and len(words) <= 3:
+                if allow_freeform and technical_shape and len(words) == 1:
                     add(cleaned, segment_type)
     return candidates[:limit]
 
@@ -563,7 +597,10 @@ def _find_match(
         section_l = (section or "").casefold()
         exact_primary = matched_alias == _normalize(term) or matched_alias == term
         in_skills = any(
-            token in section_l for token in ("skill", "technolog", "tool", "stack", "competenc")
+            token in section_l
+            for token in (
+                "skill", "technolog", "tool", "stack", "competenc", "platform",
+            )
         )
         # Alias-only hits (js→javascript) in skills still count as strong when the
         # alias group maps to the requirement; multi-word exact phrases also strong.

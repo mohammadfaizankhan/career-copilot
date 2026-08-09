@@ -65,7 +65,7 @@ type Analysis = {
     section_summary?: Record<string, string[]>;
     keyword_coverage_score?: number;
     structured_parameter_scores?: Record<string, number> | null;
-    domain_gate?: { decision?: "ALLOW" | "REJECT"; reason?: string } | null;
+    domain_gate?: { decision?: "ALLOW" | "REJECT" | "UNVERIFIED"; reason?: string } | null;
   };
   summary?: {
     method?: string;
@@ -88,7 +88,9 @@ type Analysis = {
     inference_provider?: string;
     structured_composite_score?: number | null;
     structured_parameter_scores?: Record<string, number> | null;
-    domain_gate?: { decision?: "ALLOW" | "REJECT"; reason?: string } | null;
+    domain_gate?: { decision?: "ALLOW" | "REJECT" | "UNVERIFIED"; reason?: string } | null;
+    report_status?: "generated" | "unavailable" | "invalid_llm_output" | string;
+    report_generation_id?: string | null;
   };
   created_at: string;
   resume_version_id?: string;
@@ -1381,6 +1383,19 @@ export function AtsReport() {
   const criticalMissing = uniqueTerms(analysis.summary?.critical_missing || missingTerms);
   const preferredMissing = uniqueTerms(analysis.summary?.preferred_missing || []);
   const partialTerms = uniqueTerms(analysis.summary?.partial_terms || analysis.score_breakdown?.partial_terms || partial.map((item) => item.requirement_text));
+  const domainGate = analysis.summary?.domain_gate || analysis.score_breakdown?.domain_gate;
+  const overallReportStatus = analysis.summary?.report_status || (
+    analysis.summary?.inference_provider === "deterministic"
+      ? "unavailable"
+      : overallInference
+        ? "generated"
+        : "unavailable"
+  );
+  const evidenceCounts = {
+    found: evidence.filter((item) => item.match_status === "strong_match").length,
+    partial: evidence.filter((item) => item.match_status === "partial_match").length,
+    missing: evidence.filter((item) => item.match_status === "not_found").length,
+  };
   return (
     <div className="stack">
       <PageHeader
@@ -1430,20 +1445,34 @@ export function AtsReport() {
         </p>
         <p>{analysis.summary?.disclaimer || "Keyword coverage is not a hiring prediction."}</p>
       </Card>
+      {domainGate?.decision === "REJECT" ? (
+        <Card className="stack" style={{ borderColor: "#d98282", background: "rgba(120, 30, 45, 0.18)" }}>
+          <div className="row" style={{ alignItems: "center", justifyContent: "space-between" }}>
+            <h2 style={{ margin: 0 }}>Not eligible for this role</h2>
+            <Badge variant="outline">Do not advance</Badge>
+          </div>
+          <p style={{ margin: 0 }}>{domainGate.reason || "The LLM domain gate found a clear mismatch between the resume and job description."}</p>
+        </Card>
+      ) : domainGate?.decision === "UNVERIFIED" ? (
+        <Card className="stack" style={{ borderColor: "#d7aa58" }}>
+          <h2 style={{ margin: 0 }}>Domain match not verified</h2>
+          <p style={{ margin: 0 }}>{domainGate.reason || "The LLM domain gate was unavailable. Treat this score as unverified for domain fit."}</p>
+        </Card>
+      ) : null}
       <Card className="stack">
         <h2 style={{ margin: 0 }}>Matches</h2>
         <p className="muted" style={{ margin: 0, fontSize: "var(--text-sm)" }}>
-          Each JD requirement is checked against your resume text. Found items quote the matching resume line.
+          Compact evidence view: {evidenceCounts.found} found, {evidenceCounts.partial} partial, {evidenceCounts.missing} missing. Scroll for source quotes.
         </p>
         {evidence.length === 0 ? (
           <p className="muted" style={{ margin: 0 }}>No match rows stored for this analysis.</p>
         ) : (
-          <div className="stack" style={{ gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 8, maxHeight: 660, overflowY: "auto", paddingRight: 4 }}>
             {evidence.map((row) => {
               const found = row.match_status === "strong_match" || row.match_status === "partial_match";
               return (
-                <div key={row.id} className="panel-blue" style={{ padding: 14 }}>
-                  <div className="row" style={{ alignItems: "flex-start", gap: 12 }}>
+                <div key={row.id} className="panel-blue" style={{ padding: 10 }}>
+                  <div className="row" style={{ alignItems: "center", gap: 8 }}>
                     <div style={{ flex: 1 }}>
                       <p style={{ margin: 0, fontWeight: 600 }}>{row.requirement_text}</p>
                       {found && row.resume_evidence_text ? (
@@ -1530,16 +1559,25 @@ export function AtsReport() {
         </div>
       </Card>
       <Card className="stack">
-        <h2 style={{ margin: 0 }}>Overall improvement inference</h2>
-        {overallInference ? (
+        <div className="row" style={{ alignItems: "center", justifyContent: "space-between" }}>
+          <h2 style={{ margin: 0 }}>LLM improvement report</h2>
+          <Badge variant={overallReportStatus === "generated" ? "default" : "outline"}>
+            {overallReportStatus === "generated" ? `Generated${analysis.summary?.inference_provider ? ` · ${analysis.summary.inference_provider}` : ""}` : "Unavailable"}
+          </Badge>
+        </div>
+        {overallReportStatus === "generated" && overallInference ? (
           <div className="suggestion" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
             {overallInference}
           </div>
         ) : (
           <p className="muted" style={{ margin: 0 }}>
-            No improvement brief was stored for this analysis. Run a new analysis after restarting the API.
+            No narrative is shown because the configured LLM did not return a valid report. The score and evidence above remain auditable; this screen will not substitute static prose.
           </p>
         )}
+        {overallReportStatus === "generated" && (focusAreas.length > 0 || priorityActions.length > 0 || sectionGuidance.length > 0 || doNotClaim.length > 0) ? (
+          <details>
+            <summary style={{ cursor: "pointer", fontWeight: 600 }}>Open supporting guidance</summary>
+            <div className="stack" style={{ gap: 10, marginTop: 10 }}>
         {focusAreas.length > 0 ? (
           <div className="stack" style={{ gap: 6 }}>
             <strong>Focus areas (from missing keywords)</strong>
@@ -1553,7 +1591,9 @@ export function AtsReport() {
         {priorityActions.length > 0 ? <div className="stack" style={{ gap: 6 }}><strong>Priority actions</strong><ul style={{ margin: 0, paddingLeft: 18 }}>{priorityActions.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
         {sectionGuidance.length > 0 ? <div className="stack" style={{ gap: 6 }}><strong>Section guidance</strong><ul style={{ margin: 0, paddingLeft: 18 }}>{sectionGuidance.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
         {doNotClaim.length > 0 ? <div className="stack" style={{ gap: 6 }}><strong>Evidence safeguards</strong><ul style={{ margin: 0, paddingLeft: 18 }}>{doNotClaim.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
-
+            </div>
+          </details>
+        ) : null}
       </Card>
     </div>
   );

@@ -7,6 +7,7 @@ from typing import Any
 
 from app.core.config import Settings
 from app.features.document_parsing.parsing.llm_sections import extract_sections_enriched
+from app.features.document_parsing.parsing.sections import canonicalize_sections
 from app.features.document_parsing.parsing.text_extract import extract_text
 
 
@@ -19,7 +20,9 @@ def _clean_structured(
         for key, values in sections.items()
         if values
     }
-    sections = {key: values for key, values in sections.items() if values}
+    # Canonicalize keys (academic_projects → projects, technical_skills → skills)
+    # so profile fill and ATS section strength stay consistent.
+    sections = canonicalize_sections(sections)
     warnings = [str(w).strip() for w in (result.get("warnings") or []) if str(w).strip()]
     # URLs are source facts, not model-generated fields. Preserve every URL
     # found in extracted text in a dedicated section for review/profile import.
