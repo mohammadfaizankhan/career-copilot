@@ -79,6 +79,8 @@ def _looks_like_name(line: str) -> bool:
         return False
     if line.lower() in {"resume", "curriculum vitae", "cv"}:
         return False
+    if line.casefold() in {"date : signature", "date: signature", "signature", "date"}:
+        return False
     if re.search(
         r"\b(pune|bengaluru|bangalore|hyderabad|mumbai|delhi|chennai|kolkata|"
         r"ahmedabad|noida|gurgaon|remote|india|usa|uk|united states)\b",
@@ -376,8 +378,15 @@ def build_profile_draft(
     header_pool = list(contact_lines) + [str(item) for item in unclassified]
     full_blob = "\n".join([text] + header_pool)
     full_name = None
+    labeled_name = re.search(
+        r"(?:^|\n)\s*name\s*:\s*(?P<name>[^\n|]+?)(?:\s+CCPP\s+ID\b|\s*$)",
+        text,
+        re.I,
+    )
+    if labeled_name and _looks_like_name(labeled_name.group("name").strip()):
+        full_name = _clean(labeled_name.group("name"), 120)
     candidates = _header_candidates(text, contact_lines, [str(item) for item in unclassified])
-    if candidates:
+    if full_name is None and candidates:
         full_name = _clean(candidates[0], 120)
     phone = _extract_phone(full_blob)
     emails = _EMAIL_RE.findall(full_blob)

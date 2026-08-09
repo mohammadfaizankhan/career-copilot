@@ -11,7 +11,7 @@ from app.features.document_parsing.parsing.llm_sections import (
 )
 
 HEADING_ALIASES: dict[str, frozenset[str]] = {
-    "contact": frozenset({"contact", "personal_details", "personal_information"}),
+    "contact": frozenset({"contact", "personal_details", "personal_information", "basic_information"}),
     "summary": frozenset({"summary", "profile", "professional_summary", "about_me"}),
     "skills": frozenset(
         {
@@ -35,7 +35,7 @@ HEADING_ALIASES: dict[str, frozenset[str]] = {
             "internship",
         }
     ),
-    "education": frozenset({"education", "academic_background", "qualifications"}),
+    "education": frozenset({"education", "academic_background", "academic_details", "qualifications"}),
     "projects": frozenset(
         {
             "projects",

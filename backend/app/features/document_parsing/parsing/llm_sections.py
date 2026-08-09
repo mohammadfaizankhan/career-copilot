@@ -88,13 +88,26 @@ def _looks_like_resume_name(line: str) -> bool:
     if stripped.endswith((":", ".")):
         return False
     common_heading = re.compile(
-        r"\b(resume|curriculum vitae|summary|profile|objective|experience|employment|"
-        r"education|project|certification|skill|technology|language|contact|reference)s?\b",
+        r"\b(resume|curriculum vitae|basic information|summary|profile|objective|"
+        r"experience|employment|academic details|education|project|certification|"
+        r"skill|technology|language|contact|reference)s?\b",
         re.I,
     )
     if common_heading.search(stripped):
         return False
     return True
+
+
+def _is_known_section_label(line: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"(?:basic|personal|other) information|academic details|academic projects|"
+            r"professional experience|technical skills?|technical certifications?|"
+            r"education|projects?|experience|certifications?|languages?|links?|"
+            r"extra curricular|hobbies|summary|profile|objective",
+            line.strip().rstrip(":").casefold(),
+        )
+    )
 def _numbered_source_lines(text: str) -> list[str]:
     lines = [re.sub(r"\s+", " ", line).strip() for line in (text or "").splitlines()]
     return [line for line in lines if line][:_MAX_LINES]
@@ -109,6 +122,8 @@ def extract_sections_structural(text: str, schema_version: str = "resume-extract
         line = raw_line.strip()
         if not line:
             pending_blank = True
+            continue
+        if re.fullmatch(r"[-_=]{5,}", line):
             continue
         # PDF text extractors commonly emit a person's name as title-cased text.
         # It is a contact/header value, not a section heading. Without this
@@ -126,6 +141,7 @@ def extract_sections_structural(text: str, schema_version: str = "resume-extract
             # Section labels in flattened PDFs may lose the blank line that
             # separated them from the preceding bullet list.
             or (line.isupper() and len(line.split()) <= 8)
+            or _is_known_section_label(line)
         ):
             label = line.rstrip(":").strip()
             kind = _slug_kind(label)
