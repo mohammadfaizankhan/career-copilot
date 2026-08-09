@@ -81,7 +81,11 @@ export function SignInScreen() {
       const result = await authClient.auth.signInWithPassword({ email: email.trim(), password });
       if (result.error) {
         const normalized = result.error.message.toLowerCase();
-        setNeedsVerification(normalized.includes("email not verified") || normalized.includes("verify your email"));
+      setNeedsVerification(
+        normalized.includes("email not confirmed") ||
+          normalized.includes("email not verified") ||
+          normalized.includes("verify your email"),
+      );
         return setError(authErrorMessage(result.error.message));
       }
       navigate(safeRedirectPath(search.get("next"), "/dashboard"));

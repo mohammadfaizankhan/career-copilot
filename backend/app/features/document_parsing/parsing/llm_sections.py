@@ -58,6 +58,10 @@ def _looks_like_heading(line: str) -> bool:
         return False
     if _looks_like_contact(stripped):
         return False
+    # Profile links such as ``Portfolio/Priyansu`` are often extracted as a
+    # standalone line and otherwise look like a title-cased heading.
+    if "/" in stripped or "@" in stripped:
+        return False
     if stripped.endswith(".") and len(stripped.split()) > 3:
         return False
     if stripped.count(",") >= 2:
@@ -73,6 +77,24 @@ def _looks_like_heading(line: str) -> bool:
     if letters and sum(ch.isupper() for ch in letters) / len(letters) >= 0.55 and len(words) <= 6:
         return True
     return False
+
+
+def _looks_like_resume_name(line: str) -> bool:
+    """Recognize a leading person-name line without treating it as a section."""
+    stripped = line.strip()
+    words = re.findall(r"[A-Za-z][A-Za-z'’-]*", stripped)
+    if not 2 <= len(words) <= 5 or re.search(r"\d|[@:/|]", stripped):
+        return False
+    if stripped.endswith((":", ".")):
+        return False
+    common_heading = re.compile(
+        r"\b(resume|curriculum vitae|summary|profile|objective|experience|employment|"
+        r"education|project|certification|skill|technology|language|contact|reference)s?\b",
+        re.I,
+    )
+    if common_heading.search(stripped):
+        return False
+    return True
 def _numbered_source_lines(text: str) -> list[str]:
     lines = [re.sub(r"\s+", " ", line).strip() for line in (text or "").splitlines()]
     return [line for line in lines if line][:_MAX_LINES]
@@ -82,12 +104,29 @@ def extract_sections_structural(text: str, schema_version: str = "resume-extract
     current: str | None = None
     seen_headings: list[str] = []
     pending_blank = False
+    first_content_line = True
     for raw_line in (text or "").splitlines():
         line = raw_line.strip()
         if not line:
             pending_blank = True
             continue
-        if _looks_like_heading(line) and (pending_blank or current is None or current == "contact"):
+        # PDF text extractors commonly emit a person's name as title-cased text.
+        # It is a contact/header value, not a section heading. Without this
+        # guard the entire document can be grouped under a slugified name.
+        if first_content_line and _looks_like_resume_name(line):
+            raw.setdefault("contact", []).append(line)
+            current = "contact"
+            first_content_line = False
+            pending_blank = False
+            continue
+        if _looks_like_heading(line) and (
+            pending_blank
+            or current is None
+            or current == "contact"
+            # Section labels in flattened PDFs may lose the blank line that
+            # separated them from the preceding bullet list.
+            or (line.isupper() and len(line.split()) <= 8)
+        ):
             label = line.rstrip(":").strip()
             kind = _slug_kind(label)
             current = kind
@@ -95,18 +134,22 @@ def extract_sections_structural(text: str, schema_version: str = "resume-extract
             if label not in seen_headings:
                 seen_headings.append(label)
             pending_blank = False
+            first_content_line = False
             continue
         if current is None and _looks_like_contact(line):
             raw.setdefault("contact", []).append(line)
             pending_blank = False
+            first_content_line = False
             continue
         if current is None:
             unclassified.append(line)
             pending_blank = False
+            first_content_line = False
             continue
         if pending_blank and raw[current] and raw[current][-1] != "":
             raw[current].append("")
         pending_blank = False
+        first_content_line = False
         raw[current].append(line)
     sections: dict[str, list[str]] = {}
     for key, lines in raw.items():

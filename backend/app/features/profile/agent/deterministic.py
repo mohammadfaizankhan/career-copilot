@@ -89,6 +89,29 @@ def _looks_like_name(line: str) -> bool:
     if "," in line and len(words) <= 3:
         return False
     return True
+
+
+def _header_candidates(text: str, contact_lines: list[str], unclassified: list[str]) -> list[str]:
+    """Return conservative name candidates from the resume header.
+
+    Different PDF extractors place the name in contact, unclassified, or a
+    combined line such as ``Name | email | phone``. Looking only at one parser
+    bucket made otherwise valid resumes appear nameless.
+    """
+    candidates: list[str] = []
+    for source in (contact_lines, unclassified, (text or "").splitlines()[:16]):
+        for raw in source:
+            line = re.sub(r"\s+", " ", str(raw or "")).strip(" |•-—–")
+            if not line:
+                continue
+            # Remove contact tokens while retaining a name that shares the line.
+            line = _EMAIL_RE.sub(" ", line)
+            line = _PHONE_RE.sub(" ", line)
+            line = _URL_RE.sub(" ", line)
+            line = re.sub(r"\s+", " ", line).strip(" |,;:()-")
+            if _looks_like_name(line) and line.casefold() not in {c.casefold() for c in candidates}:
+                candidates.append(line)
+    return candidates
 def _extract_phone(text: str) -> str | None:
     match = _PHONE_RE.search(text)
     if not match:
@@ -147,15 +170,33 @@ def _parse_experience_entry(entry: str, order: int) -> dict[str, Any] | None:
                 company_name = parts[1]
         if len(parts) >= 3 and not _DATE_RANGE_RE.search(parts[2]):
             location = parts[2] if not _DATE_RANGE_RE.search(parts[2]) else location
-    else:
-        at_match = re.search(r"^(?P<role>.+?)\s+(?:at|@)\s+(?P<company>.+)$", header, re.I)
-        if at_match:
-            role_title = at_match.group("role").strip()
-            company_name = at_match.group("company").strip()
-            company_name = _DATE_RANGE_RE.sub("", company_name).strip(" -–—|")
         else:
-            role_title = _DATE_RANGE_RE.sub("", header).strip(" -–—|") or header
-            company_name = "Not specified"
+            at_match = re.search(r"^(?P<role>.+?)\s+(?:at|@)\s+(?P<company>.+)$", header, re.I)
+            if at_match:
+                role_title = at_match.group("role").strip()
+                company_name = at_match.group("company").strip()
+                company_name = _DATE_RANGE_RE.sub("", company_name).strip(" -–—|")
+            elif "," in header:
+                # Common export format: "Role, Company <dates>".
+                parts = [part.strip() for part in header.split(",") if part.strip()]
+                if len(parts) >= 2:
+                    role_title = parts[0]
+                    company_name = _DATE_RANGE_RE.sub("", parts[1]).strip(" -–—|")
+                    company_name = re.sub(r"\s+(?:19|20)\d{2}(?:\s*[–—-]\s*.*)?$", "", company_name).strip()
+                else:
+                    role_title = _DATE_RANGE_RE.sub("", header).strip(" -–—|") or header
+                    company_name = "Not specified"
+            else:
+                role_title = _DATE_RANGE_RE.sub("", header).strip(" -–—|") or header
+                company_name = "Not specified"
+    # Repair flattened exports where the employer is separated from the role
+    # with a comma and no pipe/at separator.
+    if "," in header and (not role_title or role_title == "Role"):
+        comma_parts = [part.strip() for part in header.split(",") if part.strip()]
+        if len(comma_parts) >= 2:
+            role_title = comma_parts[0]
+            company_name = _DATE_RANGE_RE.sub("", comma_parts[1]).strip(" -â€“â€”|")
+            company_name = re.sub(r"\s+(?:19|20)\d{2}.*$", "", company_name).strip()
     role_title = _clean(role_title or "Role", 160)
     company_name = _clean(company_name or "Not specified", 160)
     if company_name.lower() in {"present", "current"}:
@@ -299,7 +340,16 @@ def _estimate_years(experience_entries: list[dict[str, Any]], text: str) -> floa
         return float(min(max(len(experience_entries), 1), 15))
     return None
 def _infer_career_level(years: float | None, text: str = "") -> str | None:
-    return infer_career_level(years, text)
+    # Education labels such as "Senior Secondary Education" must not promote
+    # a candidate to senior level. Keep seniority evidence from work/profile
+    # language while excluding school terminology.
+    role_text = re.sub(
+        r"\bsenior\s+secondary(?:\s+education)?\b|\bsecondary\s+education\b",
+        "",
+        text or "",
+        flags=re.I,
+    )
+    return infer_career_level(years, role_text)
 def build_profile_draft(
     plain_text: str,
     structured_content: dict[str, Any] | None = None,
@@ -326,16 +376,19 @@ def build_profile_draft(
     header_pool = list(contact_lines) + [str(item) for item in unclassified]
     full_blob = "\n".join([text] + header_pool)
     full_name = None
-    for line in header_pool:
-        first = line.split("\n")[0].strip()
-        if _looks_like_name(first):
-            full_name = _clean(first, 120)
-            break
+    candidates = _header_candidates(text, contact_lines, [str(item) for item in unclassified])
+    if candidates:
+        full_name = _clean(candidates[0], 120)
     phone = _extract_phone(full_blob)
     emails = _EMAIL_RE.findall(full_blob)
     email = emails[0] if emails else None
     location = None
-    for line in header_pool + summary_lines:
+    experience_location_lines = [
+        part
+        for entry in experience_lines[:2]
+        for part in _split_entry_lines(entry)[:3]
+    ]
+    for line in header_pool + summary_lines + experience_location_lines:
         if _EMAIL_RE.search(line) or _URL_RE.search(line):
             continue
         labeled = re.match(r"^(?:location|address|city)\s*[:\-–—]\s*(.+)$", line, re.I)

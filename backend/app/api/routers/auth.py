@@ -138,7 +138,14 @@ def auth_sign_in(payload: dict[str, Any] = Body(...), settings: Settings = Depen
 
 @router.post("/auth/session")
 def auth_session(user: CurrentUser = Depends(get_current_user)):
-    return {"user": {"id": str(user.id), "email": user.email, "full_name": user.full_name}}
+    return {
+        "user": {
+            "id": str(user.id),
+            "email": user.email,
+            "full_name": user.full_name,
+            "auth_provider": user.auth_provider,
+        }
+    }
 
 
 @router.post("/auth/sign-out", status_code=204)

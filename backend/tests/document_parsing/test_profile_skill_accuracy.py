@@ -122,3 +122,19 @@ def test_academic_projects_map_to_projects_section() -> None:
     draft = build_profile_draft(RESUME_NO_SKILLS_SECTION, cleaned)
     titles = {str(p.get("title") or "").casefold() for p in (draft.get("projects") or [])}
     assert any("gap detection" in t or "career" in t for t in titles)
+
+
+def test_name_is_recovered_from_combined_or_unclassified_resume_header() -> None:
+    resume = """
+    Priyansu Pattanaik | priyansupattanaikwork@gmail.com | +91 9876543210
+    Backend Engineer
+    Skills: Python, FastAPI
+    Experience
+    Built APIs for recruitment workflows.
+    """
+
+    draft = build_profile_draft(resume, {"sections": {"skills": ["Skills: Python, FastAPI"]}})
+
+    assert draft["profile"]["full_name"] == "Priyansu Pattanaik"
+    assert draft["profile"]["phone"]
+    assert any(skill["name"].casefold() == "python" for skill in draft["skills"])

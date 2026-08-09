@@ -22,6 +22,7 @@ class CurrentUser:
     email: str | None
     access_token: str
     full_name: str | None = None
+    auth_provider: str = "unknown"
 
 
 def parse_bearer_header(value: str | None) -> str:
@@ -47,6 +48,15 @@ def create_access_token(user_id: UUID, email: str, settings: Settings, token_ver
         "ver": int(token_version),
     }
     return jwt.encode(payload, settings.auth_secret, algorithm=JWT_ALGORITHM)
+
+
+def auth_provider_from_user_row(row: dict) -> str:
+    """Return the persisted authentication method without trusting browser state."""
+    if str(row.get("firebase_uid") or "").strip():
+        return "google"
+    if str(row.get("password_hash") or "").strip() or str(row.get("supabase_uid") or "").strip():
+        return "email"
+    return "unknown"
 
 
 def create_file_access_token(
@@ -120,7 +130,7 @@ def _user_from_token(token: str, settings: Settings) -> CurrentUser:
     rows = (
         database_client(settings)
         .table("users")
-        .select("id,email,full_name,token_version")
+        .select("id,email,full_name,token_version,password_hash,supabase_uid,firebase_uid")
         .eq("id", str(user_id))
         .limit(1)
         .execute()
@@ -131,11 +141,13 @@ def _user_from_token(token: str, settings: Settings) -> CurrentUser:
     row = rows[0]
     if int(payload.get("ver") or 0) != int(row.get("token_version") or 0):
         raise ApiError(401, "session_revoked", "This session is no longer valid. Sign in again.")
+    auth_provider = auth_provider_from_user_row(row)
     return CurrentUser(
         id=user_id,
         email=row.get("email"),
         access_token=token,
         full_name=row.get("full_name"),
+        auth_provider=auth_provider,
     )
 
 

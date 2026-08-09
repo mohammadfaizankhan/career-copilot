@@ -2122,6 +2122,7 @@ export function AccountSettings() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [accountEmail, setAccountEmail] = useState("");
+  const [authProvider, setAuthProvider] = useState<"email" | "google" | "unknown">("unknown");
   const [confirmEmail, setConfirmEmail] = useState("");
   const [confirmPhrase, setConfirmPhrase] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -2135,7 +2136,10 @@ export function AccountSettings() {
       const {
         data: { user },
       } = await authClient.auth.getUser();
-      if (active && user?.email) setAccountEmail(user.email);
+      if (active && user?.email) {
+        setAccountEmail(user.email);
+        setAuthProvider(user.auth_provider || "unknown");
+      }
     })().catch(() => undefined);
     return () => {
       active = false;
@@ -2191,6 +2195,11 @@ export function AccountSettings() {
     <Frame title="Account & access" description="Manage your active session securely.">
       <Card className="stack">
         <h2 style={{ margin: 0 }}>Session</h2>
+        <div className="panel-blue stack" style={{ gap: 6 }}>
+          <strong>Signed in with</strong>
+          <span>{authProvider === "google" ? "Google" : authProvider === "email" ? "Email and password" : "Account session"}</span>
+          {accountEmail ? <span className="muted">{accountEmail}</span> : null}
+        </div>
         <div className="cluster">
           <Button variant="secondary" onClick={logout}>
             Logout

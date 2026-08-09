@@ -10,10 +10,24 @@ from app.core.constants import JWT_ALGORITHM
 from app.core.errors import ApiError
 from app.features.auth.service import (
     _user_from_token,
+    auth_provider_from_user_row,
     create_access_token,
     create_file_access_token,
     parse_file_access_token,
 )
+
+
+@pytest.mark.parametrize(
+    ("row", "expected"),
+    [
+        ({"firebase_uid": "firebase-user", "password_hash": ""}, "google"),
+        ({"supabase_uid": "supabase-user", "password_hash": ""}, "email"),
+        ({"password_hash": "scrypt$hash"}, "email"),
+        ({}, "unknown"),
+    ],
+)
+def test_auth_provider_is_derived_from_persisted_identity(row, expected):
+    assert auth_provider_from_user_row(row) == expected
 
 
 class _Settings:

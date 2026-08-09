@@ -18,7 +18,12 @@ _PROMPT_PATH = (
     Path(__file__).resolve().parents[3] / "agents" / "prompts" / "fill_profile_from_resume_v1.txt"
 )
 _MAX_RESUME_CHARS = 28_000
-_OPTIONAL_AI_TIMEOUT_SECONDS = 12.0
+# Profile extraction receives the complete resume and a large structured schema.
+# A 12-second hard cap caused the configured NVIDIA long-context provider to be
+# cancelled before it could respond, which then looked like an extraction bug in
+# the UI. Keep a bounded safety limit, but respect the provider's configured
+# timeout up to that limit.
+_MAX_AI_TIMEOUT_SECONDS = 90.0
 def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").casefold()).strip()
 def _haystack(plain_text: str) -> str:
@@ -327,8 +332,8 @@ async def build_profile_draft_enriched(
         try:
             if provider == "groq":
                 timeout_seconds = min(
-                    float(getattr(settings, "groq_timeout_seconds", _OPTIONAL_AI_TIMEOUT_SECONDS)),
-                    _OPTIONAL_AI_TIMEOUT_SECONDS,
+                    float(getattr(settings, "groq_timeout_seconds", _MAX_AI_TIMEOUT_SECONDS)),
+                    _MAX_AI_TIMEOUT_SECONDS,
                 )
                 result: ProfileResumeExtractResult = await asyncio.wait_for(
                     GroqClient(settings).generate_structured(
@@ -341,8 +346,8 @@ async def build_profile_draft_enriched(
                 )
             else:
                 timeout_seconds = min(
-                    float(getattr(settings, "nvidia_timeout_seconds", _OPTIONAL_AI_TIMEOUT_SECONDS)),
-                    _OPTIONAL_AI_TIMEOUT_SECONDS,
+                    float(getattr(settings, "nvidia_timeout_seconds", _MAX_AI_TIMEOUT_SECONDS)),
+                    _MAX_AI_TIMEOUT_SECONDS,
                 )
                 result = await asyncio.wait_for(
                     NvidiaClient(settings).generate_structured(

@@ -16,7 +16,12 @@ import {
 import { supabaseAuthClient, SupabaseWebConfigError } from "@/features/auth/supabase";
 
 type AuthError = { message: string } | null;
-type AuthUser = { id: string; email: string; user_metadata?: { full_name?: string } };
+type AuthUser = {
+  id: string;
+  email: string;
+  auth_provider?: "email" | "google" | "unknown";
+  user_metadata?: { full_name?: string };
+};
 
 function token() {
   return typeof window === "undefined" ? "" : window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY) || "";
