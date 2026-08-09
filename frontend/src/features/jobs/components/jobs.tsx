@@ -26,6 +26,15 @@ const CareerGlobe = dynamic(() => import("@/features/jobs/components/career-glob
 
 type PipelineFilter = "all" | "saved" | "applied" | "rejected";
 
+type ResumeSummary = {
+  id: string;
+  is_active?: boolean;
+  latest_version?: {
+    id?: string;
+    extraction_status?: string | null;
+  } | null;
+};
+
 function hasCoordinates(job: Job): boolean {
   return (
     typeof job.latitude === "number" &&
@@ -69,6 +78,7 @@ export function JobsHome({ savedOnly = false }: { savedOnly?: boolean }) {
   const limit = 20;
   const requestSequence = useRef(0);
   const hydratedCacheKey = useRef<string | null>(null);
+  const lastAutoLoadKey = useRef<string | null>(null);
   const hasJobsRef = useRef(false);
 
   const cacheKey = useMemo(
@@ -152,6 +162,19 @@ export function JobsHome({ savedOnly = false }: { savedOnly?: boolean }) {
           if (filterSalaryMin !== "" && filterSalaryMin != null && Number(filterSalaryMin) >= 0) {
             body.salary_min = Number(filterSalaryMin);
           }
+
+          // Resolve the current active resume before generating. The previous
+          // flow relied on the backend to discover this state, which produced
+          // a confusing 409 when the user had just confirmed a resume in the
+          // Resume Analysis page and this page still held stale state.
+          const resumes = await apiRequest<ResumeSummary[]>("/resumes");
+          const activeResume = (Array.isArray(resumes) ? resumes : []).find((row) => row.is_active);
+          const confirmedVersion = activeResume?.latest_version;
+          if (!confirmedVersion?.id || confirmedVersion.extraction_status !== "confirmed") {
+            throw new Error("Confirm your active resume in Resume Analysis before generating recommendations.");
+          }
+          body.resume_version_id = confirmedVersion.id;
+
           const [result, savedRows] = await Promise.all([
             apiRequest<{ recommendations: Recommendation[] }>("/job-recommendations/generate", {
               method: "POST",
@@ -203,8 +226,14 @@ export function JobsHome({ savedOnly = false }: { savedOnly?: boolean }) {
   }, [fetchJobs]);
 
   useEffect(() => {
+    // React Strict Mode replays effects in development. Guard the automatic
+    // recommendation load so it cannot issue duplicate POST requests, which
+    // otherwise race the backend generation guard and surface two 409 errors.
+    const autoLoadKey = `${savedOnly}:${cacheKey}`;
+    if (lastAutoLoadKey.current === autoLoadKey) return;
+    lastAutoLoadKey.current = autoLoadKey;
     queueMicrotask(load);
-  }, [savedOnly, filterLocation, filterWorkMode, filterSalaryMin, load]);
+  }, [savedOnly, cacheKey, load]);
 
   async function syncExternalJobs() {
     setError("");
