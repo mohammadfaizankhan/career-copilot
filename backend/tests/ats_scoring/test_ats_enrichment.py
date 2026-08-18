@@ -5,7 +5,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.api import router
-from app.core.errors import ApiError
 
 
 class _Result:

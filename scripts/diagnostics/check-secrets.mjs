@@ -15,7 +15,7 @@ const rules = [
 const findings = [];
 async function walk(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (ignored.has(entry.name) || entry.name.startsWith(".env")) continue;
+    if (ignored.has(entry.name) || entry.name.startsWith(".env") || entry.name.startsWith("pytest-cache-files-")) continue;
     const path = join(directory, entry.name);
     if (path === scannerPath) continue;
     if (entry.isDirectory()) { await walk(path); continue; }

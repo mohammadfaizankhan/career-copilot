@@ -63,7 +63,8 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
       const body = (await response.json().catch(() => ({}))) as ApiErrorBody;
       if (response.status === 401) {
         window.localStorage.removeItem("career_copilot_access_token");
-        document.cookie = "career_copilot_session=; Path=/; Max-Age=0; SameSite=Lax";
+        const secure = window.location.protocol === "https:" ? "; Secure" : "";
+        document.cookie = `career_copilot_session=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
         window.dispatchEvent(new CustomEvent("career-copilot:auth-expired"));
         throw new Error(body.error?.message || "Your session has expired. Sign in again.");
       }

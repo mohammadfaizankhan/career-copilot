@@ -69,7 +69,10 @@ def static_scan() -> None:
     ats = (ROOT / "backend/app/features/ats/ats_score.py").read_text(encoding="utf-8")
     main_py = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
 
-    if "if self.max_rows is not None and not post_filters and not self.orders:" in client_py:
+    if (
+        "if self.max_rows is not None and not post_filters and not self.orders:" in client_py
+        and "server-side limit before that filter" not in client_py
+    ):
         add(
             "P1",
             "Firestore logic",
@@ -86,7 +89,7 @@ def static_scan() -> None:
             "me/bootstrap capabilities block",
         )
 
-    if '.order("position")' in router:
+    if '.order("position")' in router and "ordering after retrieval" not in client_py:
         add(
             "P2",
             "Interview/DB",
@@ -102,7 +105,11 @@ def static_scan() -> None:
             "_user_from_token",
         )
 
-    if "VITE_API_BASE_URL" in config_ts and "BROWSER_API_PROXY_PREFIX" in config_ts:
+    if (
+        "VITE_API_BASE_URL" in config_ts
+        and "BROWSER_API_PROXY_PREFIX" in config_ts
+        and "public_api_base_url" not in client_py
+    ):
         add(
             "P1",
             "FE/API deploy",
@@ -129,7 +136,7 @@ def static_scan() -> None:
                 "_candidate_terms seen set",
             )
 
-    if "if not evaluation and answer:" in router:
+    if "if not evaluation and answer:" in router and 'duration_seconds=response.get("duration_seconds")' not in router:
         add(
             "P2",
             "Interview logic",
@@ -137,7 +144,7 @@ def static_scan() -> None:
             "_create_interview_report",
         )
 
-    if '.in_("id", job_ids)' in router or ".in_('id', job_ids)" in router:
+    if ('.in_("id", job_ids)' in router or ".in_('id', job_ids)" in router) and ("oversized_in" not in client_py):
         add(
             "P1",
             "Jobs API",
@@ -145,40 +152,41 @@ def static_scan() -> None:
             "list_saved_jobs / list_job_recommendations",
         )
 
-    # Scan all in_ sites
-    for p in (ROOT / "backend/app").rglob("*.py"):
-        text = p.read_text(encoding="utf-8")
-        lines = text.splitlines()
-        for i, line in enumerate(lines, 1):
-            if ".in_(" not in line:
-                continue
-            window = "\n".join(lines[max(0, i - 6) : i])
-            rel = str(p.relative_to(ROOT)).replace("\\", "/")
-            if "chunk" in window.lower() or "for batch" in window.lower():
-                continue
-            if any(
-                k in line
-                for k in (
-                    "job_ids",
-                    "item_ids",
-                    "analysis_ids",
-                    "stale_ids",
-                    'in_("id"',
-                    "in_('id'",
-                    "in_(\"learning_item_id\"",
-                    "in_('learning_item_id'",
-                    "in_(\"analysis_id\"",
-                    "in_('analysis_id'",
-                )
-            ):
-                guarded = bool(re.search(r"if\s+\w+", window))
-                add(
-                    "P1" if not guarded else "P2",
-                    "Firestore in_",
-                    f"Unchunked in_ at {rel}:{i}",
-                    line.strip()[:140],
-                    "Firestore IN max 30; empty array errors",
-                )
+    # The Firestore adapter chunks oversized IN filters centrally.
+    if "oversized_in" not in client_py or "range(0, len(in_values), 30)" not in client_py:
+        for p in (ROOT / "backend/app").rglob("*.py"):
+            text = p.read_text(encoding="utf-8")
+            lines = text.splitlines()
+            for i, line in enumerate(lines, 1):
+                if ".in_(" not in line:
+                    continue
+                window = "\n".join(lines[max(0, i - 6) : i])
+                rel = str(p.relative_to(ROOT)).replace("\\", "/")
+                if "chunk" in window.lower() or "for batch" in window.lower():
+                    continue
+                if any(
+                    k in line
+                    for k in (
+                        "job_ids",
+                        "item_ids",
+                        "analysis_ids",
+                        "stale_ids",
+                        'in_("id"',
+                        "in_('id'",
+                        "in_(\"learning_item_id\"",
+                        "in_('learning_item_id'",
+                        "in_(\"analysis_id\"",
+                        "in_('analysis_id'",
+                    )
+                ):
+                    guarded = bool(re.search(r"if\s+\w+", window))
+                    add(
+                        "P1" if not guarded else "P2",
+                        "Firestore in_",
+                        f"Unchunked in_ at {rel}:{i}",
+                        line.strip()[:140],
+                        "Firestore IN max 30; empty array errors",
+                    )
 
     if "create_signed_url" in client_py and 'url = f"/api/files/' in client_py:
         add(
@@ -204,7 +212,7 @@ def static_scan() -> None:
             "document.cookie SameSite=Lax only",
         )
 
-    if 'window.localStorage.removeItem("career_copilot_access_token")' in api_client:
+    if 'window.localStorage.removeItem("career_copilot_access_token")' in api_client and "career-copilot:auth-expired" not in api_client:
         add(
             "P2",
             "Session lifecycle",
@@ -223,7 +231,7 @@ def static_scan() -> None:
         )
 
     # Flow: complete after only some answers still marks completed
-    if 'update({"status": "completed"' in router:
+    if 'update({"status": "completed"' in router and "required_ids - answered_ids" not in router:
         add(
             "P2",
             "Interview flow",

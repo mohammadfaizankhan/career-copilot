@@ -38,6 +38,21 @@ def _bucket_name(value: str) -> str:
     return cleaned
 
 
+def _with_file_access_token(settings: Settings, bucket: str, path: str, url: str, expires: int) -> str:
+    owner = str(path).split("/", 1)[0]
+    try:
+        uuid.UUID(owner)
+    except (ValueError, TypeError, AttributeError):
+        return url
+    from app.features.auth.service import create_file_access_token
+
+    token = create_file_access_token(
+        user_id=owner, bucket=bucket, path=path, settings=settings, expires_seconds=expires
+    )
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}token={quote(token, safe='')}"
+
+
 def _authenticated_file_url(settings: Settings, bucket: str, path: str) -> str:
     """Build the deployed API route used by all private-file responses."""
     suffix = f"/files/{quote(bucket)}/{quote(path, safe='/')}"
@@ -157,6 +172,7 @@ class _LegacyFirebaseStorageObject:
         if not blob.exists():
             raise FileNotFoundError(path)
         url = _authenticated_file_url(self.settings, self.bucket, path)
+        url = _with_file_access_token(self.settings, self.bucket, path, url, expires)
         return {"signedURL": url, "authenticated_file_url": url, "expires_in": int(expires)}
 
 
@@ -234,6 +250,7 @@ class SupabaseStorageObject:
         # storage read. Do not perform a second remote HEAD/GET just to build a
         # same-origin URL for every profile/bootstrap request.
         url = _authenticated_file_url(self.settings, self.bucket, path)
+        url = _with_file_access_token(self.settings, self.bucket, path, url, expires)
         return {"signedURL": url, "authenticated_file_url": url, "expires_in": int(expires)}
 
 
@@ -295,6 +312,7 @@ class MemoryStorageObject:
     def create_signed_url(self, path: str, expires: int) -> dict[str, str]:
         self.download(path)
         url = _authenticated_file_url(self.settings, self.bucket, path)
+        url = _with_file_access_token(self.settings, self.bucket, path, url, expires)
         return {"signedURL": url, "authenticated_file_url": url, "expires_in": int(expires)}
 
 
@@ -605,7 +623,12 @@ def firebase_admin_app(settings: Settings):
         credential_path = (Path(__file__).resolve().parents[3] / credential_path).resolve()
     if not credential_path.is_file():
         raise RuntimeError(f"Firebase credentials file not found: {credential_path}")
-    certificate = credentials.Certificate(str(credential_path))
+    if credential_path.stat().st_size == 0:
+        raise RuntimeError("Firebase credentials file is empty")
+    try:
+        certificate = credentials.Certificate(str(credential_path))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("Firebase credentials file is invalid") from exc
     credential_project = getattr(certificate, "project_id", None)
     if credential_project and credential_project != settings.firebase_project_id:
         raise RuntimeError("Firebase project mismatch between FIREBASE_PROJECT_ID and service-account credentials")
@@ -626,7 +649,10 @@ def database_client(settings: Settings):
             "database_not_configured",
             "Firestore is not configured. Set FIREBASE_PROJECT_ID and FIREBASE_CREDENTIALS_PATH.",
         )
-    return FirestoreClient(settings)
+    try:
+        return FirestoreClient(settings)
+    except RuntimeError as exc:
+        raise ApiError(503, "database_unavailable", "Firestore is unavailable or misconfigured.") from exc
 
 
 def _probe_with_timeout(label: str, fn, timeout_seconds: float = 3.0) -> tuple[bool, str | None]:
@@ -636,7 +662,8 @@ def _probe_with_timeout(label: str, fn, timeout_seconds: float = 3.0) -> tuple[b
     ``shutdown(wait=True)`` would still wait for the hung worker after a timeout,
     re-introducing the hang we are trying to prevent.
     """
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FuturesTimeout
 
     timeout = max(0.5, float(timeout_seconds))
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"probe-{label}")

@@ -1,320 +1,157 @@
-import { Link } from "@/shared/ui/router-link";
-import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
-import { ArrowRight, Menu, ShieldCheck, X } from "lucide-react";
-
-import { JobTicker } from "@/shared/ui/job-ticker";
-import { ParallaxLayer } from "@/shared/ui/parallax-layer";
+import {
+  ArrowUpRight,
+  Check,
+  Compass,
+  FileText,
+  Mic2,
+  Radar,
+  Sparkles,
+  Target,
+  Wrench,
+} from "lucide-react";
+import { lazy, Suspense } from "react";
+import { MotionProvider } from "../motion-context";
 import { ButtonLink } from "@/shared/ui/primitives";
-import { ThemeToggle } from "@/shared/ui/theme-toggle";
+import { Link } from "@/shared/ui/router-link";
 import { prefetchRoute } from "@/shared/route-prefetch";
+import { LandingNav } from "./sections/landing-nav";
 
-const Globe = lazy(() => import("@/features/jobs/components/career-globe"));
-// Below-the-fold sections stay out of the critical path / main chunk.
-const CareerJourney = lazy(() =>
-  import("./sections/career-journey").then((m) => ({ default: m.CareerJourney })),
-);
-const ResumeIntelligence = lazy(() =>
-  import("./sections/resume-intelligence").then((m) => ({ default: m.ResumeIntelligence })),
-);
-const AtsComparison = lazy(() =>
-  import("./sections/ats-comparison").then((m) => ({ default: m.AtsComparison })),
-);
-const InterviewSimulation = lazy(() =>
-  import("./sections/interview-simulation").then((m) => ({ default: m.InterviewSimulation })),
-);
-const LivingProfile = lazy(() =>
-  import("./sections/living-profile").then((m) => ({ default: m.LivingProfile })),
-);
+const CareerGlobe = lazy(() => import("@/features/jobs/components/career-globe"));
 
-function SectionFallback({ minHeight = 280 }: { minHeight?: number }) {
-  return <div className="landing-section-fallback" style={{ minHeight }} aria-hidden />;
-}
+const journey = [
+  { number: "01", label: "Read", title: "Resume + role", text: "Turn a resume and a target description into structured, usable evidence.", href: "/resume-analysis?tab=upload", icon: FileText },
+  { number: "02", label: "Trace", title: "Evidence map", text: "See every skill connected to the line of work that proves it.", href: "/resume-analysis?tab=ats", icon: Radar },
+  { number: "03", label: "Shape", title: "Sharper story", text: "Improve how your real experience reads without inventing a thing.", href: "/resume-analysis?tab=review", icon: Wrench },
+  { number: "04", label: "Rehearse", title: "Interview room", text: "Practice the hard answer before a real person asks for it.", href: "/mock-interview/preparation", icon: Mic2 },
+  { number: "05", label: "Close", title: "Skill route", text: "Follow the shortest learning route to your next credible milestone.", href: "/learning", icon: Target },
+  { number: "06", label: "Move", title: "Role radar", text: "Find opportunities with a reason attached—not just a score.", href: "/jobs", icon: Compass },
+];
 
-
-
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
+const roleSignals = [
+  ["Backend Engineer", "Berlin", "Remote"],
+  ["AI Engineer", "Bengaluru", "Hybrid"],
+  ["Product Designer", "Toronto", "Hybrid"],
+  ["ML Engineer", "Singapore", "On-site"],
+];
 
 export function LandingPage() {
-  const [open, setOpen] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
-  const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const drawerRef = useRef<HTMLDivElement>(null);
-  const drawerTitleId = useId();
-
-  const closeDrawer = useCallback(() => {
-    setOpen(false);
-  }, []);
-
-  useEffect(() => {
-    document.body.style.overflow = open ? "hidden" : "";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [open]);
-
-  // FE-006: focus trap, Escape to close, restore focus to menu button
-  useEffect(() => {
-    if (!open) return;
-
-    const drawer = drawerRef.current;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const menuButton = menuButtonRef.current;
-
-    const focusables = () =>
-      drawer
-        ? (Array.from(drawer.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-            (el) => !el.hasAttribute("disabled") && el.tabIndex !== -1
-          ) as HTMLElement[])
-        : [];
-
-    const items = focusables();
-    (items[0] ?? drawer)?.focus();
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setOpen(false);
-        return;
-      }
-      if (event.key !== "Tab" || !drawer) return;
-
-      const list = focusables();
-      if (list.length === 0) {
-        event.preventDefault();
-        drawer.focus();
-        return;
-      }
-      const first = list[0];
-      const last = list[list.length - 1];
-      const active = document.activeElement as HTMLElement | null;
-
-      if (event.shiftKey) {
-        if (active === first || !drawer.contains(active)) {
-          event.preventDefault();
-          last.focus();
-        }
-      } else if (active === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      if (previouslyFocused && previouslyFocused.isConnected) {
-        previouslyFocused.focus();
-      } else {
-        menuButton?.focus();
-      }
-    };
-  }, [open]);
-
-  useEffect(() => {
-    let pendingFrame: number | null = null;
-    const onScroll = () => {
-      if (pendingFrame !== null) return;
-      pendingFrame = window.requestAnimationFrame(() => {
-        pendingFrame = null;
-        setScrolled(window.scrollY > 20);
-      });
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      if (pendingFrame !== null) window.cancelAnimationFrame(pendingFrame);
-    };
-  }, []);
-
   return (
-    <div className="landing-page">
-      <nav
-        className={`marketing-nav ${scrolled ? "nav-scrolled" : ""} ${open ? "nav-open" : ""}`}
-        aria-label="Primary"
-      >
-        <div className="container nav-inner">
-          <Link className="brand" href="/" onClick={closeDrawer}>
-            Career Copilot
-          </Link>
-          <div className="nav-links">
-            <a href="#journey">How it works</a>
-            <a href="#analysis">Resume analysis</a>
-            <a href="#interview">Mock interview</a>
-            <Link
-              href="/sign-in"
-              className="button button-quiet"
-              onMouseEnter={() => prefetchRoute("/sign-in")}
-              onFocus={() => prefetchRoute("/sign-in")}
-            >
-              Sign in
-            </Link>
-            <span onMouseEnter={() => prefetchRoute("/sign-up")} onFocus={() => prefetchRoute("/sign-up")}>
-              <ButtonLink href="/sign-up">Get started</ButtonLink>
-            </span>
-            <ThemeToggle compact />
-          </div>
-          <div className="marketing-nav-actions">
-            <button
-              ref={menuButtonRef}
-              type="button"
-              className="icon-button mobile-menu-button"
-              onClick={() => setOpen((current) => !current)}
-              aria-label={open ? "Close navigation" : "Open navigation"}
-              aria-expanded={open}
-              aria-controls="mobile-navigation"
-            >
-              {open ? <X size={20} aria-hidden /> : <Menu size={20} aria-hidden />}
-            </button>
-          </div>
-        </div>
-      </nav>
-      {open && (
-        <div
-          id="mobile-navigation"
-          ref={drawerRef}
-          className="mobile-drawer"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby={drawerTitleId}
-          tabIndex={-1}
-        >
-          <h2 id={drawerTitleId} className="sr-only" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>
-            Mobile navigation
-          </h2>
-          <a href="#journey" onClick={closeDrawer}>
-            How it works
-          </a>
-          <a href="#analysis" onClick={closeDrawer}>
-            Resume analysis
-          </a>
-          <a href="#interview" onClick={closeDrawer}>
-            Mock interview
-          </a>
-          <Link href="/sign-in" onClick={closeDrawer}>
-            Sign in
-          </Link>
-          <Link href="/sign-up" className="button button-primary" onClick={closeDrawer}>
-            Get started
-            <ArrowRight size={17} aria-hidden />
-          </Link>
-        </div>
-      )}
-      <main id="main-content">
-        <section className="container landing-hero">
-          <div className="hero-copy">
-            <p className="eyebrow hero-eyebrow">Evidence-led career ops</p>
-            <h1 className="hero-title">
-              Navigate your career with evidence, not guesswork.
-            </h1>
-            <p className="hero-lede">
-              Analyze your resume, understand your gaps, practice real interviews, build the right
-              skills, and discover roles that match your progress.
-            </p>
-            <div className="cluster hero-actions">
-              <span onMouseEnter={() => prefetchRoute("/sign-up")} onFocus={() => prefetchRoute("/sign-up")}>
-                <ButtonLink href="/sign-up">Start your career journey</ButtonLink>
-              </span>
-              <a href="#journey" className="button button-secondary">
-                See how it works
-              </a>
+    <MotionProvider>
+      <div className="atlas-landing landing-page-root">
+        <LandingNav />
+
+        <main id="main-content">
+          <section className="atlas-hero" aria-label="Career Atlas introduction">
+            <div className="atlas-container atlas-hero-grid">
+              <div className="atlas-hero-copy">
+                <p className="atlas-kicker"><span className="atlas-kicker-mark" /> CAREER ATLAS / FIELD NOTES 01</p>
+                <h1>Navigate your career with evidence, not guesswork.</h1>
+                <p className="atlas-hero-lede">Career Copilot turns the messy middle of a job search into a visible route: what you know, what is missing, and what to do next.</p>
+                <div className="atlas-actions">
+                  <span onMouseEnter={() => prefetchRoute("/sign-up")} onFocus={() => prefetchRoute("/sign-up")}>
+                    <ButtonLink href="/sign-up" className="atlas-button atlas-button-dark">Start your career journey</ButtonLink>
+                  </span>
+                  <a href="#journey" className="atlas-text-link">See how it works <ArrowUpRight size={16} aria-hidden /></a>
+                </div>
+                <div className="atlas-hero-proof"><Check size={15} aria-hidden /><span>Private by default · grounded in your own work</span></div>
+              </div>
+
+              <div className="atlas-orbit-stage light-globe" role="img" aria-label="Illustrative global roles map">
+                <div className="atlas-orbit-label atlas-orbit-label-top mono">LIVE CAREER SIGNALS <span>04</span></div>
+                <div className="atlas-orbit-ring atlas-orbit-ring-outer" />
+                <div className="atlas-orbit-ring atlas-orbit-ring-inner" />
+                <div className="atlas-orbit-crosshair atlas-orbit-crosshair-x" />
+                <div className="atlas-orbit-crosshair atlas-orbit-crosshair-y" />
+                <div className="atlas-orbit-core">
+                  <Suspense fallback={<div className="atlas-globe-fallback"><Compass size={24} /></div>}>
+                    <div className="atlas-globe-shell" aria-hidden="true"><CareerGlobe /></div>
+                  </Suspense>
+                </div>
+                <div className="atlas-orbit-card atlas-orbit-card-a"><span className="atlas-orbit-dot" /><strong>AI Engineer</strong><small>Bengaluru · Hybrid</small></div>
+                <div className="atlas-orbit-card atlas-orbit-card-b"><span className="atlas-orbit-dot atlas-orbit-dot-warm" /><strong>Backend Engineer</strong><small>Berlin · Remote</small></div>
+                <div className="atlas-orbit-card atlas-orbit-card-c"><span className="atlas-orbit-dot atlas-orbit-dot-muted" /><strong>ML Engineer</strong><small>Singapore · On-site</small></div>
+                <div className="atlas-orbit-axis mono">N 13° 04' 22" · EVIDENCE FIELD</div>
+                <p className="atlas-orbit-caption mono">Illustrative global roles — opportunity patterns, not live openings.</p>
+              </div>
             </div>
-            <p className="hero-note">
-              <ShieldCheck size={16} aria-hidden />
-              <span>
-                Your career profile evolves with every analysis, interview, and learning milestone.
-              </span>
-            </p>
-          </div>
-          <div className="globe-frame" aria-label="Interactive map of opportunities">
-            <Suspense fallback={<div className="globe-loading" data-testid="mock-globe">Loading map...</div>}>
-              <Globe />
-            </Suspense>
-          </div>
-        </section>
+            <div className="atlas-hero-index mono">CC / 2026 <span>SCROLL TO EXPLORE</span> ↘</div>
+          </section>
 
-        <div className="landing-deferred">
-          <JobTicker />
-        </div>
-
-        <div id="journey" className="landing-deferred">
-          <Suspense fallback={<SectionFallback minHeight={420} />}>
-            <CareerJourney />
-          </Suspense>
-        </div>
-        <div id="analysis" className="landing-deferred">
-          <Suspense fallback={<SectionFallback minHeight={360} />}>
-            <ResumeIntelligence />
-          </Suspense>
-        </div>
-        <div className="landing-deferred">
-          <Suspense fallback={<SectionFallback minHeight={320} />}>
-            <AtsComparison />
-          </Suspense>
-        </div>
-        <div id="interview" className="landing-deferred">
-          <Suspense fallback={<SectionFallback minHeight={360} />}>
-            <InterviewSimulation />
-          </Suspense>
-        </div>
-        <div className="landing-deferred">
-          <Suspense fallback={<SectionFallback minHeight={320} />}>
-            <LivingProfile />
-          </Suspense>
-        </div>
-
-        <section className="section landing-outcomes">
-          <div className="container landing-outcomes-inner">
-            <ParallaxLayer speed={0.05}>
-              <p className="eyebrow">What you gain</p>
-              <h2>Meaningful outcomes.</h2>
-              <ul className="landing-outcome-list">
-                <li>Know why a role matches.</li>
-                <li>See which skills are actually missing.</li>
-                <li>Improve without inventing experience.</li>
-                <li>Practice before the real interview.</li>
-                <li>Track progress across your entire journey.</li>
-              </ul>
-            </ParallaxLayer>
-          </div>
-        </section>
-
-        <section className="section landing-cta">
-          <div className="container landing-cta-inner">
-            <h2 className="landing-cta-title">
-              Your next role should not depend on guesswork.
-            </h2>
-            <p className="landing-cta-copy">
-              Build a career profile that becomes more useful every time you analyze, practice,
-              learn, and apply.
-            </p>
-            <div className="cluster landing-cta-actions">
-              <ButtonLink href="/sign-up">Create your profile</ButtonLink>
-              <ButtonLink href="/sign-in" className="button-secondary">
-                Sign in
-              </ButtonLink>
+          <section className="atlas-signal-band" aria-label="Illustrative global role signals ticker">
+            <div className="atlas-signal-band-inner atlas-container">
+              <span className="atlas-signal-band-title mono">FIELD SIGNALS</span>
+              <div className="atlas-signal-list">{roleSignals.map(([role, location, mode]) => <span className="atlas-signal-pill" key={role}><i /> {role} <b>{location}</b> <small>{mode}</small></span>)}</div>
             </div>
-          </div>
-          <div className="landing-cta-rings" aria-hidden>
-            <span />
-            <span />
-            <span />
-          </div>
-        </section>
-      </main>
-      <footer className="footer">
-        <div className="container footer-inner">
-          <div>
-            <div className="brand">Career Copilot</div>
-            <p className="footer-tagline">Private career records. Evidence you can review.</p>
-          </div>
-          <div className="footer-links">
-            <Link href="/sign-in">Sign in</Link>
-            <Link href="/sign-up">Create account</Link>
-            <a href="#journey">How it works</a>
-          </div>
-        </div>
-      </footer>
-    </div>
+          </section>
+
+          <section id="journey" className="atlas-journey atlas-section" aria-label="Career route">
+            <div className="atlas-container">
+              <div className="atlas-section-intro">
+                <p className="atlas-kicker">FROM SIGNAL TO DIRECTION</p>
+                <h2>A job search with a north star.</h2>
+                <p>Six connected moves. Every one leaves a clearer record for the next.</p>
+              </div>
+              <div className="atlas-journey-grid">
+                {journey.map(({ number, label, title, text, href, icon: Icon }) => (
+                  <article key={number} data-journey-card className="atlas-route-card">
+                    <div className="atlas-route-card-top"><span className="atlas-route-number mono">{number}</span><Icon size={19} strokeWidth={1.7} aria-hidden /></div>
+                    <p className="atlas-route-label mono">{label}</p>
+                    <h3>{title}</h3>
+                    <p>{text}</p>
+                    <Link href={href} className="atlas-card-link">Open {label.toLowerCase()} <ArrowUpRight size={15} aria-hidden /></Link>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="atlas-proof atlas-section" aria-label="Evidence engine">
+            <div className="atlas-container atlas-proof-grid">
+              <div className="atlas-section-intro atlas-proof-copy">
+                <p className="atlas-kicker">THE SOURCE MAP</p>
+                <h2>Your resume is not a PDF. It is a source map.</h2>
+                <p>Career Copilot keeps recommendations accountable. Select a skill and trace it back to the exact experience, project, or practice session that supports it.</p>
+                <Link href="/resume-analysis?tab=upload" className="atlas-text-link">Explore resume analysis <ArrowUpRight size={16} aria-hidden /></Link>
+              </div>
+              <div className="atlas-source-board">
+                <div className="atlas-board-bar"><span><i /> SOURCE / RESUME_2026.PDF</span><span className="mono">3 LINKS FOUND</span></div>
+                <div className="atlas-board-body">
+                  <div className="atlas-source-column"><span className="mono">EXPERIENCE</span><p>Built scalable services using <mark>Go</mark> and <mark>Docker</mark>.</p><span className="mono">PROJECT</span><p>Designed a high-throughput API in <mark>FastAPI</mark>.</p></div>
+                  <div className="atlas-source-connector"><span /><span /><span /></div>
+                  <div className="atlas-evidence-column"><span className="mono">VERIFIED CHIPS</span><div className="atlas-evidence-chip"><b>Go (Golang)</b><small><Check size={12} /> experience</small></div><div className="atlas-evidence-chip"><b>Docker / Containers</b><small><Check size={12} /> experience</small></div><div className="atlas-evidence-chip atlas-evidence-chip-warm"><b>FastAPI / REST APIs</b><small><Sparkles size={12} /> project evidence</small></div></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="atlas-console atlas-section" aria-label="Decision console">
+            <div className="atlas-container">
+              <div className="atlas-console-heading"><p className="atlas-kicker">THE DECISION CONSOLE</p><h2>Know the move before you make it.</h2><p>Transparent enough to trust. Specific enough to act on.</p></div>
+              <div className="atlas-console-window">
+                <div className="atlas-console-top"><span className="mono">ROLE FIT / BACKEND ENGINEER</span><span className="atlas-live-tag"><i /> LIVE PROFILE</span></div>
+                <div className="atlas-console-grid">
+                  <div className="atlas-console-score"><span className="mono">EVIDENCE FIT</span><strong>78<small>%</small></strong><div className="atlas-score-bar"><i /></div><p>Strong foundation. One visible gap.</p></div>
+                  <div className="atlas-console-list"><div><span className="atlas-check-box"><Check size={13} /></span><span><b>Python core</b><small>confirmed in experience</small></span></div><div><span className="atlas-check-box"><Check size={13} /></span><span><b>API architecture</b><small>confirmed in project work</small></span></div><div className="atlas-console-gap"><span className="atlas-gap-box">+</span><span><b>Kubernetes</b><small>build one milestone before applying</small></span></div></div>
+                  <div className="atlas-console-next"><span className="mono">RECOMMENDED NEXT</span><strong>Close the gap</strong><p>Start a targeted route for production deployment fundamentals.</p><Link href="/learning" className="atlas-console-link">Open learning route <ArrowUpRight size={15} aria-hidden /></Link></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="atlas-interview atlas-section" aria-label="Interview practice">
+            <div className="atlas-container atlas-interview-grid">
+              <div><p className="atlas-kicker">THE PRACTICE ROOM</p><h2>Confidence is a traceable skill.</h2><p>Practice answers, not vibes. Your interview record becomes another signal in the profile that guides your next move.</p><Link href="/mock-interview/preparation" className="atlas-text-link">Enter the practice room <ArrowUpRight size={16} aria-hidden /></Link></div>
+              <div className="atlas-interview-card"><div className="atlas-interview-chrome"><span className="atlas-live-tag"><i /> RECORDING</span><span className="mono">Q2 / 05:14</span></div><div className="atlas-interview-question">“Tell me about a time you scaled a system under unexpected load.”</div><div className="atlas-waveform" aria-hidden>{[20, 38, 52, 28, 65, 42, 72, 34, 56, 26, 44, 68, 35, 52, 24, 40].map((height, index) => <i key={index} style={{ height: `${height}%` }} />)}</div><div className="atlas-interview-foot"><span>clarity <b>84</b></span><span>evidence <b>91</b></span><span>pace <b>76</b></span></div></div>
+            </div>
+          </section>
+
+          <section className="atlas-cta atlas-section" aria-label="Start your career journey">
+            <div className="atlas-container atlas-cta-inner"><span className="atlas-cta-compass"><Compass size={24} /></span><p className="atlas-kicker">NEXT COORDINATE</p><h2>Your next role should have a reason.</h2><p>Build the profile that makes your progress visible—to you first, and to the right opportunity next.</p><div className="atlas-actions"><span onMouseEnter={() => prefetchRoute("/sign-up")} onFocus={() => prefetchRoute("/sign-up")}><ButtonLink href="/sign-up" className="atlas-button atlas-button-dark">Create my profile</ButtonLink></span><Link href="/sign-in" className="atlas-text-link">I already have an atlas <ArrowUpRight size={16} aria-hidden /></Link></div></div>
+          </section>
+        </main>
+
+        <footer className="atlas-footer"><div className="atlas-container atlas-footer-inner"><Link href="/" className="atlas-footer-brand"><span /> Career Copilot</Link><p>Private career records. Evidence you can review.</p><nav aria-label="Footer navigation"><Link href="/sign-in">Sign in</Link><Link href="/sign-up">Create account</Link><a href="#journey">How it works</a><Link href="/resume-analysis?tab=upload">Resume analysis</Link><Link href="/mock-interview/preparation">Mock interview</Link></nav></div></footer>
+      </div>
+    </MotionProvider>
   );
 }

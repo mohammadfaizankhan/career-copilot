@@ -8,7 +8,8 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, File, Form, Header, Query, UploadFile
-from fastapi.responses import JSONResponse, Response as PlainResponse
+from fastapi.responses import JSONResponse
+from fastapi.responses import Response as PlainResponse
 
 from app.agents.registry import agents_status
 from app.api.routers.auth import router as auth_router
@@ -3134,6 +3135,7 @@ async def _create_interview_report(
                 question_type=question.get("question_type"),
                 target_role=session.get("target_role"),
                 mode=session.get("mode"),
+                duration_seconds=response.get("duration_seconds"),
             )
         if isinstance(evaluation, dict) and not evaluation.get("gaze_metrics"):
             # Prefer metrics stored on the response document when eval payload is older.

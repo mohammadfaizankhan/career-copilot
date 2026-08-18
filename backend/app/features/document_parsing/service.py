@@ -11,8 +11,8 @@ from app.core.errors import ApiError
 from app.features.document_parsing.parsing.llm_sections import extract_sections_enriched
 from app.features.document_parsing.parsing.sections import (
     HEADING_ALIASES,
-    canonicalize_sections,
     canonical_section_key,
+    canonicalize_sections,
     extract_sections,
     match_section_heading,
 )

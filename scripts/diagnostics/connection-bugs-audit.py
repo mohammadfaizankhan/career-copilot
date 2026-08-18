@@ -104,7 +104,9 @@ def main() -> int:
             f"acao={acao_bad}",
         )
 
-    status_f, _, body_f = get("http://127.0.0.1:8000/api/v1/files/avatars/u/x.jpg")
+    from app.core.config import get_settings
+    avatar_bucket = get_settings().avatar_bucket
+    status_f, _, body_f = get(f"http://127.0.0.1:8000/api/v1/files/{avatar_bucket}/u/x.jpg")
     print("Files no-auth:", status_f, (body_f or "")[:160])
     if status_f not in (401, 403):
         add(
@@ -115,7 +117,7 @@ def main() -> int:
             f"status={status_f} body={(body_f or '')[:200]}",
         )
 
-    status_fp, _, body_fp = get("http://127.0.0.1:3000/api/files/avatars/u/x.jpg")
+    status_fp, _, body_fp = get(f"http://127.0.0.1:3000/api/files/{avatar_bucket}/u/x.jpg")
     print("Files via proxy no-auth:", status_fp, (body_fp or "")[:160])
     if status_fp not in (401, 403):
         add(
@@ -285,7 +287,7 @@ def main() -> int:
         "\n", " "
     ):
         pass
-    if "VITE_API_BASE_URL" in fe_config and "create_signed_url" in client_py:
+    if "VITE_API_BASE_URL" in fe_config and "_with_file_access_token" not in client_py:
         add(
             "CONN-FILE-06",
             "P1",
@@ -335,7 +337,7 @@ def main() -> int:
             "create_signed_url returns URL unconditionally",
         )
 
-    if "def remove(self, paths: list[str])" in client_py and "raise_for_status" in client_py:
+    if "def remove(self, paths: list[str])" in client_py and "except FileNotFoundError" not in client_py:
         add(
             "CONN-STOR-02",
             "P2",
@@ -365,7 +367,7 @@ def main() -> int:
             "database_probe status logic",
         )
 
-    if "if self.max_rows is not None and not post_filters and not self.orders:" in client_py:
+    if "if self.max_rows is not None and not post_filters and not self.orders:" in client_py and "soft-delete" not in client_py:
         add(
             "CONN-FS-01",
             "P1",

@@ -137,7 +137,8 @@ function ProtectedRoute() {
         if (!active) return;
         if (error || !data?.user) {
           window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
-          document.cookie = "career_copilot_session=; Path=/; Max-Age=0; SameSite=Lax";
+          const secure = window.location.protocol === "https:" ? "; Secure" : "";
+          document.cookie = `career_copilot_session=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
           setState("no");
         }
       } catch {

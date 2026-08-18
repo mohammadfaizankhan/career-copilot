@@ -96,7 +96,7 @@ export function Dashboard() {
 
 
   return (
-    <div className="feature-page">
+    <div className="feature-page dashboard-page">
       <PageHeader
         eyebrow="Career workspace"
         title={`Welcome, ${first}.`}

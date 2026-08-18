@@ -7,8 +7,8 @@ from typing import Any
 from uuid import UUID
 
 import httpx
+from fastapi import APIRouter, Body, Depends, Request, Response
 
-from fastapi import APIRouter, Body, Depends, Response
 from app.core.config import Settings, get_settings
 from app.core.constants import MIN_PASSWORD_LENGTH
 from app.core.errors import ApiError
@@ -149,8 +149,14 @@ def auth_session(user: CurrentUser = Depends(get_current_user)):
 
 
 @router.post("/auth/sign-out", status_code=204)
-def auth_sign_out(response: Response):
-    response.delete_cookie("career_copilot_session")
+def auth_sign_out(request: Request, response: Response):
+    response.delete_cookie(
+        "career_copilot_session",
+        path="/",
+        secure=request.url.scheme == "https",
+        httponly=False,
+        samesite="lax",
+    )
 
 
 @router.post("/auth/firebase")

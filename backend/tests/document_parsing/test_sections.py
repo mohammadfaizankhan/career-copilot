@@ -8,8 +8,8 @@ from app.features.document_parsing.parsing.llm_sections import (
     _numbered_source_lines,
     extract_sections_structural,
 )
-from app.features.document_parsing.service import extract_skill_candidates
 from app.features.document_parsing.pipeline import _clean_structured
+from app.features.document_parsing.service import extract_skill_candidates
 
 
 def test_structural_splits_on_layout_headings() -> None:

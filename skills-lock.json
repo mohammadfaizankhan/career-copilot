@@ -85,6 +85,12 @@
       "skillPath": ".github/skills/fix-errors/SKILL.md",
       "computedHash": "356d24d2637dd0db3a783381929755dcf7ae563564cd62032bbc0a6d69eb404c"
     },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "computedHash": "93f53fd1c0352d3d7ec17b8f73d7351bf76f4821e55d123c9d2abc2c53ba48e4"
+    },
     "ppt-visual": {
       "source": "claude-office-skills/skills",
       "sourceType": "github",

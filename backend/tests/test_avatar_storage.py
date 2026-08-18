@@ -1,8 +1,9 @@
 import unittest
 from types import SimpleNamespace
+from uuid import uuid4
 
 from app.core.config import Settings
-from app.database.client import MemoryStorageObject, ObjectStorage
+from app.database.client import MemoryStorageObject, ObjectStorage, SupabaseStorageObject
 from app.features.profile.avatars import attach_avatar_url
 
 
@@ -45,6 +46,19 @@ class AvatarStorageTests(unittest.TestCase):
         self.assertIsNotNone(enriched)
         self.assertEqual(enriched["avatar_path"], path)
         self.assertIsNone(enriched["avatar_url"])
+
+    def test_export_signed_url_contains_scoped_file_token(self) -> None:
+        settings = self.settings.model_copy(
+            update={
+                "supabase_url": "https://example.supabase.co",
+                "supabase_service_role_key": "server-key-for-test",
+                "supabase_storage_bucket": "private-files",
+            }
+        )
+        path = f"{uuid4()}/resumes/export.pdf"
+        url = SupabaseStorageObject(settings, settings.document_bucket).create_signed_url(path, 300)["signedURL"]
+        self.assertIn("/api/v1/files/candidate-documents/", url)
+        self.assertIn("token=", url)
 
     def test_existing_avatar_file_receives_same_origin_url(self) -> None:
         avatar_path = "candidate-1/avatars/avatar.jpg"

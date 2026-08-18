@@ -13,9 +13,9 @@ import { ThemeToggle } from "@/shared/ui/theme-toggle";
 
 function Shell({ children, title, description }: { children: React.ReactNode; title: string; description: string }) {
   return (
-    <main id="main-content" className="auth-shell">
-      <aside className="auth-aside" aria-label="Product overview">
-        <Link className="brand" href="/">
+    <main id="main-content" className="auth-shell atlas-auth-shell">
+      <aside className="auth-aside atlas-auth-aside" aria-label="Product overview">
+        <Link className="brand atlas-auth-brand" href="/">
           Career Copilot
         </Link>
         <div className="auth-aside-copy">
@@ -30,9 +30,9 @@ function Shell({ children, title, description }: { children: React.ReactNode; ti
         </div>
         <p className="auth-aside-foot">Private by default · you review before reuse</p>
       </aside>
-      <section className="auth-main">
+      <section className="auth-main atlas-auth-main">
         <div className="auth-main-inner">
-          <div className="auth-theme-control"><ThemeToggle compact /></div>
+          <div className="auth-theme-control atlas-auth-theme-control"><ThemeToggle compact /></div>
           {children}
         </div>
       </section>
@@ -140,8 +140,8 @@ export function SignInScreen() {
   }
   return (
     <Shell title="Welcome back." description="Sign in to open your private career records and continue where you left off.">
-      <form className="auth-card panel stack" onSubmit={submit}>
-        <div>
+      <form className="auth-card panel stack atlas-auth-card" onSubmit={submit}>
+        <div className="atlas-auth-card-header">
           <p className="eyebrow">Secure sign in</p>
           <h1>Sign in</h1>
         </div>
@@ -270,7 +270,7 @@ export function SignUpScreen() {
       description="Your records stay private. Review what is saved before it powers another workflow."
     >
       {sent ? (
-        <div className="auth-card panel empty-state">
+        <div className="auth-card panel empty-state atlas-auth-card">
           <MailCheck size={44} />
           <h1>Check your inbox</h1>
           <p>Open the verification link we sent to activate your account.</p>
@@ -282,8 +282,8 @@ export function SignUpScreen() {
           <p className="muted">If it does not arrive, check spam or promotions folders, then try resending the verification email.</p>
         </div>
       ) : (
-        <form className="auth-card panel stack" onSubmit={submit}>
-          <div>
+        <form className="auth-card panel stack atlas-auth-card" onSubmit={submit}>
+          <div className="atlas-auth-card-header">
             <p className="eyebrow">Create account</p>
             <h1>Get started</h1>
           </div>
@@ -339,7 +339,7 @@ export function SignUpScreen() {
 export function VerifyEmailScreen() {
   return (
     <Shell title="Confirm your email." description="We sent a verification link to finish setting up your account.">
-      <div className="auth-card panel empty-state">
+      <div className="auth-card panel empty-state atlas-auth-card">
         <MailCheck size={44} />
         <h1>Check your inbox</h1>
         <p>Open the verification link to continue. If it expired, return to sign up and request a new message.</p>
@@ -385,8 +385,8 @@ export function PasswordScreen({ reset = false }: { reset?: boolean }) {
           : "Password recovery email is not configured for this deployment."
       }
     >
-      <form className="auth-card panel stack" onSubmit={submit}>
-        <div>
+      <form className="auth-card panel stack atlas-auth-card" onSubmit={submit}>
+        <div className="atlas-auth-card-header">
           <p className="eyebrow">{reset ? "Account security" : "Account recovery"}</p>
           <h1>{reset ? "Choose a new password" : "Reset your password"}</h1>
         </div>

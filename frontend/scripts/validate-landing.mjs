@@ -136,8 +136,8 @@ async function main() {
   await page.locator(".landing-hero").scrollIntoViewIfNeeded();
   const globeOk = await page.evaluate(() => {
     const canvas = document.querySelector("canvas");
-    const fallback = document.querySelector(".globe-fallback-container");
-    const loading = document.querySelector(".globe-loading");
+    const fallback = document.querySelector(".radar-globe-wrapper, .radar-globe-fallback, .globe-fallback-container");
+    const loading = document.querySelector(".globe-loading, [data-testid='mock-globe']");
     return Boolean(canvas || fallback || loading);
   });
   if (globeOk) {
@@ -214,7 +214,7 @@ async function main() {
   const failedRequests = [];
   page.on("requestfailed", (req) => failedRequests.push(`${req.method()} ${req.url()} ${req.failure()?.errorText}`));
   await page.goto(baseUrl, { waitUntil: "networkidle", timeout: 60000 });
-  const criticalFails = failedRequests.filter((r) => !/favicon|analytics|hot-update/i.test(r));
+  const criticalFails = failedRequests.filter((r) => !/favicon|analytics|hot-update|fonts\.googleapis|gstatic/i.test(r));
   if (criticalFails.length === 0) {
     pass("network-no-critical-failures", `tracked=${failedRequests.length}`);
   } else {

@@ -101,7 +101,7 @@ def signed_avatar_url(
     if not owner:
         # Fall back to first path segment (avatars are stored as {user_id}/avatars/...).
         owner = path.split("/", 1)[0]
-    if not owner:
+    if not owner or "token=" in url:
         return url
     try:
         file_token = create_file_access_token(

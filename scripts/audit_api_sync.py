@@ -26,7 +26,7 @@ def find(level: str, area: str, message: str, **extra) -> None:
 
 def extract_backend_routes() -> list[tuple[str, str, str]]:
     routes: list[tuple[str, str, str]] = []
-    api_dir = BACKEND / "app" / "api"
+    api_dir = BACKEND / "app"
     pattern = re.compile(
         r"""@router\.(get|post|put|patch|delete)\(\s*['\"]([^'\"]+)['\"]""",
         re.I,

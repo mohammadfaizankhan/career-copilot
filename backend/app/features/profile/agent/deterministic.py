@@ -5,7 +5,11 @@ import re
 from typing import Any
 
 from app.features.document_parsing.parsing.sections import canonicalize_sections
-from app.features.document_parsing.service import extract_sections, extract_skill_candidates, skill_source_text
+from app.features.document_parsing.service import (
+    extract_sections,
+    extract_skill_candidates,
+    skill_source_text,
+)
 from app.features.profile.agent.normalize import (
     extract_explicit_years,
     infer_career_level,
@@ -197,7 +201,7 @@ def _parse_experience_entry(entry: str, order: int) -> dict[str, Any] | None:
         comma_parts = [part.strip() for part in header.split(",") if part.strip()]
         if len(comma_parts) >= 2:
             role_title = comma_parts[0]
-            company_name = _DATE_RANGE_RE.sub("", comma_parts[1]).strip(" -â€“â€”|")
+            company_name = re.sub(r"^[\s|\-\u2013\u2014]+|[\s|\-\u2013\u2014]+$", "", _DATE_RANGE_RE.sub("", comma_parts[1]))
             company_name = re.sub(r"\s+(?:19|20)\d{2}.*$", "", company_name).strip()
     role_title = _clean(role_title or "Role", 160)
     company_name = _clean(company_name or "Not specified", 160)

@@ -5,7 +5,7 @@ import { isWebGLAvailable } from "./globe-utils";
 export type GlobeJobPin = {
   id: string;
   title: string;
-  company: string;
+  company?: string;
   location?: string | null;
   work_mode?: string | null;
   description?: string | null;
@@ -19,17 +19,26 @@ export type GlobeJobPin = {
 
 export { isWebGLAvailable };
 
-export default function CareerGlobe({ jobs = [] }: { jobs?: GlobeJobPin[] }) {
+const DEFAULT_NODES: GlobeJobPin[] = [
+  { id: "node-1", title: "AI Engineer", company: "Meta", location: "Bengaluru", work_mode: "Hybrid", latitude: 12.9716, longitude: 77.5946 },
+  { id: "node-2", title: "Data Analyst", company: "Barclays", location: "London", work_mode: "On-site", latitude: 51.5074, longitude: -0.1278 },
+  { id: "node-3", title: "Backend Engineer", company: "Zalando", location: "Berlin", work_mode: "Remote", latitude: 52.5204, longitude: 13.405 },
+  { id: "node-4", title: "Product Designer", company: "Shopify", location: "Toronto", work_mode: "Hybrid", latitude: 43.6532, longitude: -79.3832 },
+  { id: "node-5", title: "ML Engineer", company: "Grab", location: "Singapore", work_mode: "On-site", latitude: 1.3521, longitude: 103.8198 },
+  { id: "node-6", title: "Cloud Engineer", company: "Atlassian", location: "Sydney", work_mode: "Remote", latitude: -33.8688, longitude: 151.2093 },
+];
+
+export default function CareerGlobe({ jobs = DEFAULT_NODES }: { jobs?: GlobeJobPin[] }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pointerRef = useRef({ x: 0, y: 0, active: false, pointerId: -1 });
-  const velocityRef = useRef({ phi: 0, theta: 0 });
-  const anglesRef = useRef({ phi: 0, theta: 0.2 });
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const [webgl, setWebgl] = useState(true);
-  const [isDragging, setIsDragging] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  const activeJobs = jobs.length > 0 ? jobs : DEFAULT_NODES;
 
   const markers = useMemo(
     () =>
-      jobs
+      activeJobs
         .filter(
           (job) =>
             typeof job.latitude === "number" &&
@@ -42,8 +51,16 @@ export default function CareerGlobe({ jobs = [] }: { jobs?: GlobeJobPin[] }) {
           location: [job.latitude, job.longitude] as [number, number],
           size: 0.05,
         })),
-    [jobs],
+    [activeJobs],
   );
+
+  // Cycle active node callout automatically every 3.5s
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setActiveIndex((prev) => (prev + 1) % activeJobs.length);
+    }, 3500);
+    return () => clearInterval(interval);
+  }, [activeJobs.length]);
 
   useEffect(() => {
     if (!isWebGLAvailable()) {
@@ -53,28 +70,30 @@ export default function CareerGlobe({ jobs = [] }: { jobs?: GlobeJobPin[] }) {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    let width = canvas.parentElement?.clientWidth || 480;
+    let width = containerRef.current?.clientWidth || 440;
     const onResize = () => {
-      width = canvas.parentElement?.clientWidth || 480;
+      width = containerRef.current?.clientWidth || 440;
     };
     window.addEventListener("resize", onResize);
 
     let globe: ReturnType<typeof createGlobe> | undefined;
     let frame = 0;
+    let phi = 0;
+
     try {
       globe = createGlobe(canvas, {
         devicePixelRatio: 2,
         width: width * 2,
         height: width * 2,
-        phi: anglesRef.current.phi,
-        theta: anglesRef.current.theta,
-        dark: 1,
-        diffuse: 1.2,
+        phi: 0,
+        theta: 0.2,
+        dark: 0, // Light Mode Globe
+        diffuse: 1.1,
         mapSamples: 16000,
-        mapBrightness: 6,
-        baseColor: [0.12, 0.18, 0.28],
-        markerColor: [0.35, 0.75, 1],
-        glowColor: [0.2, 0.35, 0.55],
+        mapBrightness: 2.8,
+        baseColor: [0.91, 0.94, 0.97], // Light pale ice blue-white
+        markerColor: [0.09, 0.41, 0.67], // #1769aa primary navy
+        glowColor: [0.85, 0.91, 0.97], // Soft atmosphere glow
         markers,
       });
     } catch {
@@ -84,20 +103,10 @@ export default function CareerGlobe({ jobs = [] }: { jobs?: GlobeJobPin[] }) {
     }
 
     const animate = () => {
-      if (!pointerRef.current.active) {
-        anglesRef.current.phi += 0.003 + velocityRef.current.phi;
-        anglesRef.current.theta = Math.max(
-          -0.8,
-          Math.min(0.8, anglesRef.current.theta + velocityRef.current.theta),
-        );
-        velocityRef.current.phi *= 0.94;
-        velocityRef.current.theta *= 0.94;
-        if (Math.abs(velocityRef.current.phi) < 0.00005) velocityRef.current.phi = 0;
-        if (Math.abs(velocityRef.current.theta) < 0.00005) velocityRef.current.theta = 0;
-      }
+      phi += 0.003;
       globe?.update({
-        phi: anglesRef.current.phi,
-        theta: anglesRef.current.theta,
+        phi,
+        theta: 0.2,
         width: width * 2,
         height: width * 2,
         markers,
@@ -113,98 +122,58 @@ export default function CareerGlobe({ jobs = [] }: { jobs?: GlobeJobPin[] }) {
     };
   }, [markers]);
 
+  const activeJob = activeJobs[activeIndex] || activeJobs[0];
+
   if (!webgl) {
     return (
-      <div className="globe-fallback" data-testid="career-globe" role="img" aria-label="Career opportunity map unavailable">
-        <p className="muted">Interactive globe requires WebGL in this browser.</p>
-        <ul className="stack" style={{ margin: 0, paddingLeft: 18 }}>
-          {jobs.slice(0, 5).map((job) => (
-            <li key={job.id}>
-              {job.title}
-              {job.company ? ` · ${job.company}` : ""}
-            </li>
-          ))}
-        </ul>
+      <div
+        className="radar-globe-fallback"
+        data-testid="career-globe"
+        role="img"
+        aria-label="Global Career Radar map unavailable"
+      >
+        <div className="radar-fallback-inner">
+          <p className="mono">CAREER RADAR NODES</p>
+          <ul className="radar-fallback-list">
+            {activeJobs.slice(0, 6).map((n, idx) => (
+              <li key={n.id} className={idx === activeIndex ? "is-active" : ""}>
+                <strong>{n.title}</strong> {n.location ? `· ${n.location}` : ""} ({n.work_mode || "Hybrid"})
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
     );
   }
 
   return (
     <div
-      className="globe-stage"
+      ref={containerRef}
+      className="radar-globe-wrapper"
       data-testid="career-globe"
       role="application"
-      aria-label="Interactive globe of career opportunities. Drag to rotate the globe."
-      style={{ touchAction: "none", cursor: isDragging ? "grabbing" : "grab" }}
-      onPointerDown={(event) => {
-        event.currentTarget.setPointerCapture(event.pointerId);
-        pointerRef.current = { x: event.clientX, y: event.clientY, active: true, pointerId: event.pointerId };
-        velocityRef.current = { phi: 0, theta: 0 };
-        setIsDragging(true);
-      }}
-      onPointerUp={(event) => {
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-          event.currentTarget.releasePointerCapture(event.pointerId);
-        }
-        pointerRef.current = { ...pointerRef.current, active: false, pointerId: -1 };
-        setIsDragging(false);
-      }}
-      onPointerCancel={() => {
-        pointerRef.current = { ...pointerRef.current, active: false, pointerId: -1 };
-        setIsDragging(false);
-      }}
-      onPointerMove={(event) => {
-        if (!pointerRef.current.active) return;
-        const dx = event.clientX - pointerRef.current.x;
-        const dy = event.clientY - pointerRef.current.y;
-        const phiVelocity = dx * 0.005;
-        const thetaVelocity = dy * 0.003;
-        anglesRef.current.phi += phiVelocity;
-        anglesRef.current.theta = Math.max(-0.8, Math.min(0.8, anglesRef.current.theta + thetaVelocity));
-        velocityRef.current = { phi: phiVelocity, theta: thetaVelocity };
-        pointerRef.current = { ...pointerRef.current, x: event.clientX, y: event.clientY };
-      }}
+      aria-label="Interactive Global Career Radar map"
     >
-      <canvas
-        ref={canvasRef}
-        style={{ width: "100%", height: "100%", maxWidth: 520, aspectRatio: "1 / 1", display: "block", margin: "0 auto", pointerEvents: "none" }}
-      />
-      {/* Native Cobe markers are the only globe pins; details remain in the job list below. */}
-      {/*
-        <div
-          className="globe-job-preview"
-          role="status"
-          onMouseEnter={() => setHoveredJobId(hoveredJob.id)}
-          onMouseLeave={() => setHoveredJobId(null)}
-        >
-          <strong>{hoveredJob.title}</strong>
-          <span>{hoveredJob.company}</span>
-          {hoveredJob.location ? <span>{hoveredJob.location}</span> : null}
-          {hoveredJob.work_mode ? <span>{hoveredJob.work_mode}</span> : null}
-          {hoveredJob.salary_min || hoveredJob.salary_max ? (
-            <span>
-              {hoveredJob.salary_min && hoveredJob.salary_max
-                ? `$${hoveredJob.salary_min.toLocaleString()} – $${hoveredJob.salary_max.toLocaleString()}`
-                : hoveredJob.salary_min
-                  ? `From $${hoveredJob.salary_min.toLocaleString()}`
-                  : `Up to $${hoveredJob.salary_max?.toLocaleString()}`}
-            </span>
-          ) : null}
-          {hoveredJob.description ? <p>{hoveredJob.description}</p> : null}
-          {hoveredJob.requirements?.length ? (
-            <ul>
-              {hoveredJob.requirements.slice(0, 5).map((requirement) => (
-                <li key={requirement}>{requirement}</li>
-              ))}
-            </ul>
-          ) : null}
-          {hoveredJob.application_url ? (
-            <a href={hoveredJob.application_url} target="_blank" rel="noreferrer">
-              View full job
-            </a>
-          ) : null}
-        </div>
-      */}
+      <div className="radar-globe-circle">
+        <canvas ref={canvasRef} className="radar-globe-canvas" />
+
+        {/* Dynamic Single Callout Connected to Active Point */}
+        {activeJob && (
+          <div className="radar-callout-overlay" role="status" aria-live="polite">
+            <div className="radar-callout-card">
+              <span className="radar-callout-pulse" aria-hidden />
+              <div className="radar-callout-info">
+                <strong className="radar-callout-title">{activeJob.title}</strong>
+                <div className="radar-callout-meta">
+                  {activeJob.location && <span>{activeJob.location}</span>}
+                  {activeJob.location && activeJob.work_mode && <span className="meta-sep">•</span>}
+                  {activeJob.work_mode && <span>{activeJob.work_mode}</span>}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

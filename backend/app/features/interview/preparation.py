@@ -1,14 +1,13 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
-
-import logging
 
 from app.agents.providers.groq_client import GroqClient
 from app.core.config import Settings

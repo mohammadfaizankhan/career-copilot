@@ -7,45 +7,17 @@
   {
     "level": "INFO",
     "area": "meta",
-    "message": "backend_routes=84 frontend_calls=120"
+    "message": "backend_routes=94 frontend_calls=121"
   },
   {
-    "level": "FAIL",
+    "level": "OK",
     "area": "contract",
-    "message": "frontend\u2192backend path match: 116/120"
-  },
-  {
-    "level": "FAIL",
-    "area": "contract",
-    "message": "frontend path has no backend route: POST /resume-versions/${data.version.id}/exports",
-    "file": "frontend\\src\\features\\resume\\components\\resume-flow.tsx",
-    "kind": "apiRequest"
-  },
-  {
-    "level": "FAIL",
-    "area": "contract",
-    "message": "frontend path has no backend route: GET /resume-exports/${created.id}/download",
-    "file": "frontend\\src\\features\\resume\\components\\resume-flow.tsx",
-    "kind": "apiRequest"
-  },
-  {
-    "level": "FAIL",
-    "area": "contract",
-    "message": "frontend path has no backend route: POST /resume-versions/${data.version.id}/exports",
-    "file": "frontend\\src\\features\\resume\\components\\resume-flow.tsx",
-    "kind": "apiRequest-tpl"
-  },
-  {
-    "level": "FAIL",
-    "area": "contract",
-    "message": "frontend path has no backend route: GET /resume-exports/${created.id}/download",
-    "file": "frontend\\src\\features\\resume\\components\\resume-flow.tsx",
-    "kind": "apiRequest-tpl"
+    "message": "frontend\u2192backend path match: 121/121"
   },
   {
     "level": "INFO",
     "area": "contract",
-    "message": "backend routes with no frontend caller (static): 13"
+    "message": "backend routes with no frontend caller (static): 18"
   },
   {
     "level": "INFO",
@@ -124,6 +96,36 @@
     "area": "orphan-backend",
     "message": "POST /auth/resend",
     "file": "backend\\app\\api\\routers\\auth.py"
+  },
+  {
+    "level": "INFO",
+    "area": "orphan-backend",
+    "message": "GET /resume-improvements/capabilities",
+    "file": "backend\\app\\features\\resume_improvement\\routes.py"
+  },
+  {
+    "level": "INFO",
+    "area": "orphan-backend",
+    "message": "GET /resume-improvements/{run_id}",
+    "file": "backend\\app\\features\\resume_improvement\\routes.py"
+  },
+  {
+    "level": "INFO",
+    "area": "orphan-backend",
+    "message": "GET /resume-improvements/{run_id}/suggestions",
+    "file": "backend\\app\\features\\resume_improvement\\routes.py"
+  },
+  {
+    "level": "INFO",
+    "area": "orphan-backend",
+    "message": "PATCH /resume-suggestions/{suggestion_id}",
+    "file": "backend\\app\\features\\resume_improvement\\routes.py"
+  },
+  {
+    "level": "INFO",
+    "area": "orphan-backend",
+    "message": "POST /resume-improvements/{run_id}/apply",
+    "file": "backend\\app\\features\\resume_improvement\\routes.py"
   },
   {
     "level": "OK",
@@ -331,16 +333,16 @@
   {
     "level": "INFO",
     "area": "live",
-    "message": "http://127.0.0.1:8000/health unreachable: URLError"
+    "message": "http://127.0.0.1:8000/health unreachable: HTTPError"
   },
   {
     "level": "INFO",
     "area": "live",
-    "message": "http://127.0.0.1:8000/api/v1/health unreachable: URLError"
+    "message": "http://127.0.0.1:8000/api/v1/health unreachable: TimeoutError"
   },
   {
-    "level": "INFO",
+    "level": "OK",
     "area": "live",
-    "message": "http://127.0.0.1:8000/docs unreachable: URLError"
+    "message": "http://127.0.0.1:8000/docs \u2192 HTTP 200"
   }
 ]
