@@ -115,8 +115,8 @@ def test_profile_fill_prefers_groq(monkeypatch):
         order.append("nvidia")
         raise AssertionError("should not call nvidia first")
 
-    monkeypatch.setattr(profile_pipeline.GroqClient, "generate_structured", groq_structured)
-    monkeypatch.setattr(profile_pipeline.NvidiaClient, "generate_structured", nvidia_structured)
+    monkeypatch.setattr("app.agents.providers.reliable.GroqClient.generate_structured", groq_structured)
+    monkeypatch.setattr("app.agents.providers.reliable.NvidiaClient.generate_structured", nvidia_structured)
     monkeypatch.setattr(
         profile_pipeline,
         "_llm_to_draft",

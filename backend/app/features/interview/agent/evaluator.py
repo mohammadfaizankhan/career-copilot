@@ -7,8 +7,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.agents.providers.groq_client import GroqClient
+from app.agents.providers.reliable import generate_structured_with_failover
 from app.core.config import Settings
+from app.core.errors import ApiError
 
 logger = logging.getLogger(__name__)
 INTERVIEW_REPORT_VERSION = "evidence-report-v2"
@@ -430,7 +431,7 @@ async def evaluate_interview_answer(
     duration_seconds: float | int | None = None,
     gaze_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Evaluate one answer: deterministic base + optional Groq interviewer voice."""
+    """Evaluate one answer with a validated LLM response plus measured metrics."""
     base = _score_answer_heuristic(answer, question, duration_seconds=duration_seconds)
     fillers = base["filler_analysis"]
     delivery = base.get("speaking_delivery") or analyze_speaking_delivery(answer, duration_seconds)
@@ -445,73 +446,52 @@ async def evaluate_interview_answer(
             f"{base.get('interviewer_feedback') or ''} {gaze.get('notes') or tip}"
         ).strip()[:2000]
     if not (answer or "").strip():
-        return {
-            **base,
-            "verdict": "weak",
-            "score": 0,
-            "interviewer_feedback": "No answer was captured. Share a specific example next time.",
-            "strengths": [],
-            "improvements": ["Provide a spoken or typed answer before saving."],
-            "speaking_delivery": delivery,
-            "gaze_metrics": gaze,
-        }
+        raise ApiError(422, "empty_interview_answer", "Provide an answer before requesting LLM feedback.")
 
-    if not settings.groq_configured:
-        return {**base, "gaze_metrics": gaze}
+    from pathlib import Path
 
-    try:
-        from pathlib import Path
-
-        prompt_path = Path(__file__).resolve().parents[3] / "agents" / "prompts" / "interview_answer_eval_v1.txt"
-        system_prompt = prompt_path.read_text(encoding="utf-8")
-        client = GroqClient(settings)
-        result: AnswerEvaluationResult = await client.generate_structured(
-            system_prompt=system_prompt,
-            user_payload={
-                "question": question,
-                "answer": (answer or "")[:8000],
-                "question_type": question_type,
-                "target_role": target_role,
-                "mode": mode,
-                "filler_analysis": {
-                    "total_count": fillers.get("total_count"),
-                    "counts": fillers.get("counts"),
-                    "notes": fillers.get("notes"),
-                },
-                "speaking_delivery": {
-                    "words_per_minute": delivery.get("words_per_minute"),
-                    "pace_band": delivery.get("pace_band"),
-                    "pace_notes": delivery.get("pace_notes"),
-                    "duration_seconds": delivery.get("duration_seconds"),
-                },
-                "gaze_metrics": gaze,
+    prompt_path = Path(__file__).resolve().parents[3] / "agents" / "prompts" / "interview_answer_eval_v1.txt"
+    system_prompt = prompt_path.read_text(encoding="utf-8")
+    result, provider = await generate_structured_with_failover(
+        settings,
+        system_prompt=system_prompt,
+        user_payload={
+            "question": question,
+            "answer": (answer or "")[:8000],
+            "question_type": question_type,
+            "target_role": target_role,
+            "mode": mode,
+            "filler_analysis": {
+                "total_count": fillers.get("total_count"),
+                "counts": fillers.get("counts"),
+                "notes": fillers.get("notes"),
             },
-            schema_model=AnswerEvaluationResult,
-        )
-        verdict = (result.verdict or base["verdict"]).strip()[:40]
-        feedback = (result.interviewer_feedback or base["interviewer_feedback"]).strip()[:2000]
-        strengths = list(result.strengths) if result.strengths is not None else list(base["strengths"])
-        improvements = list(result.improvements) if result.improvements is not None else list(base["improvements"])
-        better = (result.better_approach if result.better_approach is not None else base["better_approach"]).strip()[:2000]
-        filler_notes = (result.filler_notes if result.filler_notes is not None else base["filler_notes"]).strip()[:600]
-        return {
-            "verdict": verdict,
-            "score": int(result.score),
-            "interviewer_feedback": feedback,
-            "strengths": strengths[:8],
-            "improvements": improvements[:8],
-            "better_approach": better,
-            "filler_notes": filler_notes,
-            "filler_analysis": fillers,
-            "speaking_delivery": delivery,
+            "speaking_delivery": {
+                "words_per_minute": delivery.get("words_per_minute"),
+                "pace_band": delivery.get("pace_band"),
+                "pace_notes": delivery.get("pace_notes"),
+                "duration_seconds": delivery.get("duration_seconds"),
+            },
             "gaze_metrics": gaze,
-            "provider": "groq",
-            "model": settings.groq_model,
-            "agent": "interview_evaluation",
-        }
-    except Exception as exc:
-        logger.warning("interview_answer_eval_failed reason=%s", type(exc).__name__)
-        return {**base, "gaze_metrics": gaze, "fallback": True, "fallback_reason": type(exc).__name__}
+        },
+        schema_model=AnswerEvaluationResult,
+    )
+    result = AnswerEvaluationResult.model_validate(result)
+    return {
+        "verdict": result.verdict.strip()[:40],
+        "score": int(result.score),
+        "interviewer_feedback": result.interviewer_feedback.strip()[:2000],
+        "strengths": [str(item).strip() for item in result.strengths[:8]],
+        "improvements": [str(item).strip() for item in result.improvements[:8]],
+        "better_approach": result.better_approach.strip()[:2000],
+        "filler_notes": result.filler_notes.strip()[:600],
+        "filler_analysis": fillers,
+        "speaking_delivery": delivery,
+        "gaze_metrics": gaze,
+        "provider": provider,
+        "model": getattr(settings, f"{provider}_model", None),
+        "agent": "interview_evaluation",
+    }
 
 
 def _deterministic_session_report(
@@ -725,15 +705,14 @@ async def generate_interview_session_report(
     target_role: str | None = None,
     mode: str | None = None,
 ) -> dict[str, Any]:
+    if not turns:
+        raise ApiError(422, "empty_interview_session", "Complete at least one answered question before requesting a report.")
     base = _deterministic_session_report(turns, target_role=target_role)
-    if not settings.groq_configured or not turns:
-        return base
     try:
         from pathlib import Path
 
         prompt_path = Path(__file__).resolve().parents[3] / "agents" / "prompts" / "interview_session_report_v1.txt"
         system_prompt = prompt_path.read_text(encoding="utf-8")
-        client = GroqClient(settings)
         compact_turns = [
             {
                 "position": t.get("position"),
@@ -751,7 +730,8 @@ async def generate_interview_session_report(
             }
             for t in turns
         ]
-        result: SessionReportResult = await client.generate_structured(
+        result, provider = await generate_structured_with_failover(
+            settings,
             system_prompt=system_prompt,
             user_payload={
                 "target_role": target_role,
@@ -764,6 +744,7 @@ async def generate_interview_session_report(
             },
             schema_model=SessionReportResult,
         )
+        result = SessionReportResult.model_validate(result)
         overall = int(result.overall_score)
         communication = int(result.communication_score)
         structure = int(result.structure_score)
@@ -800,17 +781,18 @@ async def generate_interview_session_report(
             "practice_readiness": readiness,
             "score_series": base.get("score_series") or [],
             "question_reviews": base["question_reviews"],
-            "provider": "groq",
-            "model": settings.groq_model,
+            "provider": provider,
+            "model": getattr(settings, f"{provider}_model", None),
             "agent": "interview_evaluation",
             "report_version": INTERVIEW_REPORT_VERSION,
             "generation_status": "ai_generated",
         }
+    except ApiError:
+        raise
     except Exception as exc:
         logger.warning("interview_session_report_failed reason=%s", type(exc).__name__)
-        return {
-            **base,
-            "fallback": True,
-            "fallback_reason": type(exc).__name__,
-            "generation_status": "evidence_only_ai_unavailable",
-        }
+        raise ApiError(
+            503,
+            "llm_generation_failed",
+            "The LLM did not return a valid interview report after retrying. Retry the request.",
+        ) from exc

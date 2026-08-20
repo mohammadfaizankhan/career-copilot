@@ -101,6 +101,7 @@ class NvidiaClient:
         schema_model: type,
         temperature: float | None = None,
         allow_repair: bool = True,
+        max_retries: int | None = None,
     ) -> Any:
         if not self.settings.nvidia_configured:
             raise ApiError(
@@ -127,7 +128,7 @@ class NvidiaClient:
             ],
         }
         repair_allowed = allow_repair and bool(getattr(self.settings, "llm_allow_repair", True))
-        raw = await self._request(payload)
+        raw = await self._request(payload, max_retries=max_retries)
         try:
             return schema_model.model_validate(parse_json_object(raw))
         except (json.JSONDecodeError, ValidationError, TypeError, ValueError):
@@ -151,7 +152,7 @@ class NvidiaClient:
                     },
                 ],
             }
-            repaired = await self._request(repair_payload)
+            repaired = await self._request(repair_payload, max_retries=max_retries)
             try:
                 return schema_model.model_validate(parse_json_object(repaired))
             except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
@@ -160,13 +161,13 @@ class NvidiaClient:
                     "invalid_provider_response",
                     "The AI provider returned an invalid structured response.",
                 ) from exc
-    async def _request(self, payload: dict[str, Any]) -> str:
+    async def _request(self, payload: dict[str, Any], *, max_retries: int | None = None) -> str:
         route = provider_route(self.settings, "nvidia")
         headers = {"Content-Type": "application/json"}
         if route["api_key"]:
             headers["Authorization"] = f"Bearer {route['api_key']}"
         timeout = httpx.Timeout(route["timeout_seconds"])
-        attempts = route["max_retries"] + 1
+        attempts = (route["max_retries"] if max_retries is None else max_retries) + 1
         limiter = await provider_rpm_limiter(route["provider"], self.settings.llm_rpm_limit)
         async with httpx.AsyncClient(timeout=timeout, transport=self.transport) as client:
             for attempt in range(attempts):

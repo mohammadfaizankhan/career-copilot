@@ -2,7 +2,6 @@
 import {
   ACCESS_TOKEN_STORAGE_KEY,
   resolveApiBase,
-  SESSION_COOKIE_NAME,
   isDemoCookiePresent,
 } from "@/shared/config";
 import {
@@ -29,8 +28,6 @@ function token() {
 
 function saveToken(value: string) {
   window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, value);
-  const secure = window.location.protocol === "https:" ? "; Secure" : "";
-  document.cookie = `${SESSION_COOKIE_NAME}=${encodeURIComponent(value)}; Path=/; SameSite=Lax${secure}`;
   // Real sign-in must never stay trapped in demo mode (empty in-memory API).
   document.cookie = `career_copilot_demo=; Max-Age=0; Path=/; SameSite=Lax`;
 }
@@ -240,8 +237,6 @@ export function createClient() {
       },
       async signOut() {
         window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
-        const secure = window.location.protocol === "https:" ? "; Secure" : "";
-        document.cookie = `${SESSION_COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Lax${secure}`;
         await signOutFromFirebase().catch(() => undefined);
         try {
           await supabaseAuthClient().auth.signOut();

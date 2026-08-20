@@ -183,6 +183,8 @@ class SupabaseStorageObject:
         self.settings = settings
         self.bucket = _bucket_name(logical_bucket)
         self.storage_bucket = _bucket_name(settings.supabase_storage_bucket)
+        # Reuse a connection pool for all operations through this object.
+        self._http = httpx.Client(timeout=30)
 
     def _url(self, path: str = "") -> str:
         key = f"{self.bucket}/{_safe_object_key(path)}" if path else self.bucket
@@ -195,7 +197,7 @@ class SupabaseStorageObject:
             "Authorization": f"Bearer {server_key}",
             **(kwargs.pop("headers", {}) or {}),
         }
-        response = httpx.request(method, url, headers=headers, timeout=30, **kwargs)
+        response = self._http.request(method, url, headers=headers, **kwargs)
         if response.status_code == 404:
             raise FileNotFoundError(url)
         response.raise_for_status()
@@ -327,20 +329,31 @@ class ObjectStorage:
     def __init__(self, settings: Settings):
         self.settings = settings
         self._memory = str(settings.app_env).lower() == "test"
+        self._objects: dict[str, SupabaseStorageObject | MemoryStorageObject] = {}
 
     def from_(self, bucket: str) -> SupabaseStorageObject | MemoryStorageObject:
         from app.core.errors import ApiError
 
+        logical_bucket = _bucket_name(bucket)
+        cached = self._objects.get(logical_bucket)
+        if cached is not None:
+            return cached
+
         if self._memory:
-            return MemoryStorageObject(self.settings, bucket)
-        if self.settings.supabase_storage_configured:
-            return SupabaseStorageObject(self.settings, bucket)
-        raise ApiError(
-            503,
-            "storage_not_configured",
-            "Object storage is not configured. Set SUPABASE_URL, "
-            "SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET.",
-        )
+            storage: SupabaseStorageObject | MemoryStorageObject = MemoryStorageObject(
+                self.settings, logical_bucket
+            )
+        elif self.settings.supabase_storage_configured:
+            storage = SupabaseStorageObject(self.settings, logical_bucket)
+        else:
+            raise ApiError(
+                503,
+                "storage_not_configured",
+                "Object storage is not configured. Set SUPABASE_URL, "
+                "SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET.",
+            )
+        self._objects[logical_bucket] = storage
+        return storage
 
 
 class FirestoreResult(Result):

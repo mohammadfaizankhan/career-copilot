@@ -154,7 +154,7 @@ def auth_sign_out(request: Request, response: Response):
         "career_copilot_session",
         path="/",
         secure=request.url.scheme == "https",
-        httponly=False,
+        httponly=True,
         samesite="lax",
     )
 

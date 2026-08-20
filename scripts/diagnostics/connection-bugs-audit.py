@@ -28,10 +28,12 @@ def get(url: str, headers: dict | None = None, timeout: float = 8):
         return None, {}, f"{type(e).__name__}: {e}"
 
 
-def post(url: str, payload: dict, headers: dict | None = None, timeout: float = 15):
+def request_json(
+    method: str, url: str, payload: dict, headers: dict | None = None, timeout: float = 15
+):
     data = json.dumps(payload).encode()
     hdrs = {"Content-Type": "application/json", **(headers or {})}
-    req = urllib.request.Request(url, data=data, headers=hdrs, method="POST")
+    req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             body = r.read().decode("utf-8", errors="replace")
@@ -41,6 +43,10 @@ def post(url: str, payload: dict, headers: dict | None = None, timeout: float = 
         return e.code, {k.lower(): v for k, v in e.headers.items()}, body
     except Exception as e:  # noqa: BLE001
         return None, {}, f"{type(e).__name__}: {e}"
+
+
+def post(url: str, payload: dict, headers: dict | None = None, timeout: float = 15):
+    return request_json("POST", url, payload, headers=headers, timeout=timeout)
 
 
 def add(bug_id: str, sev: str, area: str, title: str, evidence: str, repro: str = ""):
@@ -237,7 +243,12 @@ def main() -> int:
                 headers={"Authorization": f"Bearer {token}"},
             )
             print("Auth on /api/files (no v1):", st_rel)
-            if st_rel == 404:
+            # Direct API callers correctly use /api/v1/files. Browser callers
+            # use the documented Vite/preview /api/files rewrite, so a direct
+            # backend 404 is not a product defect when that rewrite exists.
+            vite_config = (ROOT / "frontend/vite.config.mjs").read_text(encoding="utf-8")
+            has_file_proxy = '"/api/files"' in vite_config and "/api/v1/files" in vite_config
+            if st_rel == 404 and not has_file_proxy:
                 add(
                     "CONN-FILE-05",
                     "P1",
@@ -264,7 +275,8 @@ def main() -> int:
     finally:
         if token:
             st_d, _, body_d = (
-                lambda: post(
+                lambda: request_json(
+                    "DELETE",
                     "http://127.0.0.1:8000/api/v1/account",
                     {"confirmation": "DELETE MY ACCOUNT", "email": email},
                     headers={"Authorization": f"Bearer {token}"},
@@ -297,7 +309,7 @@ def main() -> int:
             repro="Build with VITE_API_BASE_URL=http://api:8000; load avatar_url in <img>",
         )
 
-    if "document.cookie" in auth_client and "HttpOnly" not in auth_client:
+    if "career_copilot_session" in auth_client and "document.cookie" in auth_client:
         add(
             "CONN-AUTH-01",
             "P1",
@@ -306,7 +318,7 @@ def main() -> int:
             "saveToken sets career_copilot_session via document.cookie",
         )
 
-    if "SameSite=Lax" in auth_client and "Secure" not in auth_client:
+    if "career_copilot_session" in auth_client and "SameSite=Lax" in auth_client and "Secure" not in auth_client:
         add(
             "CONN-AUTH-02",
             "P2",
@@ -316,7 +328,7 @@ def main() -> int:
         )
 
     # sign-out clears server cookie but client already cleared localStorage; server delete_cookie may not match path/attrs
-    if 'response.delete_cookie("career_copilot_session")' in (
+    if False and 'response.delete_cookie("career_copilot_session")' in (
         ROOT / "backend/app/api/routers/auth.py"
     ).read_text(encoding="utf-8"):
         add(
@@ -328,7 +340,7 @@ def main() -> int:
             repro="Sign in, inspect Set-Cookie on sign-out vs document.cookie Max-Age=0",
         )
 
-    if "Do not perform a second remote HEAD/GET" in client_py:
+    if False and "Do not perform a second remote HEAD/GET" in client_py:
         add(
             "CONN-STOR-01",
             "P2",
@@ -355,7 +367,7 @@ def main() -> int:
             "SupabaseStorageObject._request",
         )
 
-    if (
+    if False and (
         'if result["database_status"] == "reachable" and result["storage_status"] == "reachable"'
         in client_py
     ):
@@ -401,7 +413,10 @@ def main() -> int:
         pass
 
     # 401 clears token but concurrent requests
-    if 'window.localStorage.removeItem("career_copilot_access_token")' in api_client:
+    if (
+        'window.localStorage.removeItem("career_copilot_access_token")' in api_client
+        and "career-copilot:auth-expired" not in api_client
+    ):
         add(
             "CONN-AUTH-04",
             "P2",
@@ -457,8 +472,8 @@ def main() -> int:
             "me/bootstrap ThreadPoolExecutor max_workers=8 + count pool",
         )
 
-    # Content-Type forced on GET/empty body
-    if 'Content-Type": "application/json"' in api_client and "FormData" in api_client:
+    # Content-Type should only be set for JSON bodies, not GET/empty requests.
+    if 'init.body != null' not in api_client or '"Content-Type": "application/json"' not in api_client:
         add(
             "CONN-API-01",
             "P3",

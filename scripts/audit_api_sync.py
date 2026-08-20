@@ -13,6 +13,9 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 FRONTEND = ROOT / "frontend" / "src"
@@ -345,7 +348,7 @@ def try_live_health() -> None:
         import urllib.request
 
         for url in (
-            "http://127.0.0.1:8000/health",
+            "http://127.0.0.1:8000/api/v1/health/live",
             "http://127.0.0.1:8000/api/v1/health",
             "http://127.0.0.1:8000/docs",
         ):

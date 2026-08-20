@@ -4,6 +4,7 @@ import time
 from types import SimpleNamespace
 
 import httpx
+import pytest
 from pydantic import BaseModel
 
 from app.agents.providers.groq_client import GroqClient
@@ -37,24 +38,27 @@ def test_section_extraction_falls_back_when_nvidia_is_unavailable(monkeypatch):
     assert any("structural layout" in warning.lower() for warning in result["warnings"])
 
 
-def test_profile_draft_falls_back_when_nvidia_is_unavailable(monkeypatch):
+def test_profile_draft_fails_without_an_llm_answer(monkeypatch):
     async def unavailable(*_args, **_kwargs):
         raise ApiError(503, "nvidia_unavailable", "provider unavailable")
 
-    monkeypatch.setattr(profile_pipeline.NvidiaClient, "generate_structured", unavailable)
-    settings = SimpleNamespace(nvidia_configured=True, nvidia_temperature=0.2)
-
-    result = asyncio.run(
-        profile_pipeline.build_profile_draft_enriched(
-            "Priyansu Pattanaik\nBackend Engineer\nPython, FastAPI",
-            {"sections": {"summary": ["Backend Engineer"], "skills": ["Python, FastAPI"]}},
-            settings,
-        )
+    monkeypatch.setattr("app.agents.providers.reliable.NvidiaClient.generate_structured", unavailable)
+    settings = SimpleNamespace(
+        llm_provider="nvidia",
+        nvidia_configured=True,
+        nvidia_model="test-model",
+        groq_configured=False,
     )
 
-    assert result["meta"]["fallback"] is True
-    assert result["meta"]["provider"] == "deterministic"
-    assert result["meta"]["ai_used"] is False
+    with pytest.raises(ApiError) as caught:
+        asyncio.run(
+            profile_pipeline.build_profile_draft_enriched(
+                "Priyansu Pattanaik\nBackend Engineer\nPython, FastAPI",
+                {"sections": {"summary": ["Backend Engineer"], "skills": ["Python, FastAPI"]}},
+                settings,
+            )
+        )
+    assert caught.value.code == "llm_generation_failed"
 
 
 def test_saved_document_parsing_never_waits_for_a_remote_provider(monkeypatch):
@@ -88,29 +92,30 @@ def test_saved_document_parsing_never_waits_for_a_remote_provider(monkeypatch):
     assert calls == [{"text": plain_text, "prefer_llm": False}]
 
 
-def test_optional_profile_ai_has_a_short_total_timeout(monkeypatch):
+def test_profile_ai_timeout_fails_without_static_content(monkeypatch):
     async def slow_provider(*_args, **_kwargs):
         await asyncio.sleep(1)
 
-    monkeypatch.setattr(profile_pipeline.NvidiaClient, "generate_structured", slow_provider)
+    monkeypatch.setattr("app.agents.providers.reliable.NvidiaClient.generate_structured", slow_provider)
     settings = SimpleNamespace(
+        llm_provider="nvidia",
         nvidia_configured=True,
-        nvidia_temperature=0.2,
-        nvidia_timeout_seconds=0.01,
+        nvidia_model="test-model",
+        groq_configured=False,
     )
 
     started = time.perf_counter()
-    result = asyncio.run(
-        profile_pipeline.build_profile_draft_enriched(
-            "Priyansu Pattanaik\nBackend Engineer\nPython, FastAPI",
-            {"sections": {"summary": ["Backend Engineer"], "skills": ["Python, FastAPI"]}},
-            settings,
+    with pytest.raises(ApiError) as caught:
+        asyncio.run(
+            profile_pipeline.build_profile_draft_enriched(
+                "Priyansu Pattanaik\nBackend Engineer\nPython, FastAPI",
+                {"sections": {"summary": ["Backend Engineer"], "skills": ["Python, FastAPI"]}},
+                settings,
+            )
         )
-    )
 
-    assert time.perf_counter() - started < 0.25
-    assert result["meta"]["fallback"] is True
-    assert result["meta"]["provider"] == "deterministic"
+    assert time.perf_counter() - started < 3.0
+    assert caught.value.code == "llm_generation_failed"
 
 
 def test_omniroute_route_is_opt_in_and_openai_compatible():

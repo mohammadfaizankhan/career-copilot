@@ -6,10 +6,12 @@ const browserChannel = process.env.PLAYWRIGHT_BROWSER_CHANNEL || undefined;
 
 export default defineConfig({
   testDir: "./e2e",
-  fullyParallel: true,
+  // The suite targets one Vite dev server. Unbounded workers make the server
+  // queue requests and produce false navigation timeouts on larger viewports.
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   reporter: [["list"]],
   use: {
     baseURL: e2eBase,

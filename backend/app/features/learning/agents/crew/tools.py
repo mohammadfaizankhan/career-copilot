@@ -5,8 +5,10 @@ import logging
 import re
 from typing import Any
 
-from app.agents.providers.groq_client import PROMPTS_DIR, GroqClient
+from app.agents.providers.groq_client import PROMPTS_DIR
+from app.agents.providers.reliable import generate_structured_with_failover
 from app.core.config import Settings
+from app.core.errors import ApiError
 from app.features.learning.agents.crew.models import YoutubeLessonPlanItem, YoutubeLessonPlanResult
 from app.features.learning.article_catalog import build_reading_resources, is_allowed_article_url
 from app.features.learning.youtube_api import search_youtube_videos
@@ -54,26 +56,6 @@ def tool_extract_ats_gaps(context: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _deterministic_plan(allowed_gaps: list[str]) -> YoutubeLessonPlanResult:
-    items: list[YoutubeLessonPlanItem] = []
-    for index, gap in enumerate(allowed_gaps, start=1):
-        items.append(
-            YoutubeLessonPlanItem(
-                skill_gap=gap,
-                title=f"Learn {gap} with guided practice",
-                objective=(
-                    f"Study {gap} using free video lessons and articles matched to this ATS gap, "
-                    f"then practice a small project. Only claim {gap} when the experience is real."
-                ),
-                youtube_search_query=f"{gap} tutorial for beginners",
-                article_search_query=f"{gap} tutorial guide article for beginners",
-                estimated_minutes=60 if index <= 4 else 90,
-                difficulty="foundational" if index <= 4 else "applied",
-            )
-        )
-    return YoutubeLessonPlanResult(recommendations=items)
-
-
 async def tool_plan_youtube_lessons(settings: Settings, context: dict[str, Any]) -> dict[str, Any]:
     allowed_gaps: list[str] = list(context.get("allowed_gaps") or [])
     if not allowed_gaps:
@@ -87,26 +69,18 @@ async def tool_plan_youtube_lessons(settings: Settings, context: dict[str, Any])
             "Never invent video IDs or article URLs. Only produce search queries and learning copy."
         ),
     }
-    system_prompt = (
-        _PROMPT_PATH.read_text(encoding="utf-8")
-        if _PROMPT_PATH.is_file()
-        else (
-            "Return JSON recommendations only for allowed_gaps. "
-            "Never invent video IDs or article URLs. Include youtube and article search queries."
-        )
+    if not _PROMPT_PATH.is_file():
+        raise ApiError(500, "missing_learning_prompt", "The learning planner prompt is missing.")
+    system_prompt = _PROMPT_PATH.read_text(encoding="utf-8")
+    result, provider = await generate_structured_with_failover(
+        settings,
+        system_prompt=system_prompt,
+        user_payload=payload,
+        schema_model=YoutubeLessonPlanResult,
+        temperature=0.2,
     )
-    if settings.groq_configured:
-        try:
-            result = await GroqClient(settings).generate_structured(
-                system_prompt=system_prompt,
-                user_payload=payload,
-                schema_model=YoutubeLessonPlanResult,
-                temperature=0.2,
-            )
-            return {"provider": "groq", "plan": result.model_dump()}
-        except Exception as exc:
-            logger.warning("learning youtube planner groq failed: %s", type(exc).__name__)
-    return {"provider": "deterministic", "plan": _deterministic_plan(allowed_gaps).model_dump()}
+    result = YoutubeLessonPlanResult.model_validate(result)
+    return {"provider": provider, "plan": result.model_dump()}
 
 
 def _is_safe_resource_url(url: str) -> bool:
@@ -216,16 +190,21 @@ async def tool_validate_and_materialize(settings: Settings, context: dict[str, A
             rejected.append(f"{gap_raw}:duplicate_gap")
             continue
         gap = allowed_map[key]
-        yt_query = str(raw.get("youtube_search_query") or f"{gap} tutorial").strip()
+        yt_query = str(raw.get("youtube_search_query") or "").strip()
         article_query = str(raw.get("article_search_query") or "").strip() or None
+        if not yt_query or not article_query:
+            rejected.append(f"{gap}:llm_missing_search_query")
+            continue
         gap_tokens = {t for t in re.findall(r"[a-z0-9+#.]{2,}", normal_skill(gap))}
         query_tokens = {t for t in re.findall(r"[a-z0-9+#.]{2,}", normal_skill(yt_query))}
         if gap_tokens and not (gap_tokens & query_tokens):
-            yt_query = f"{gap} tutorial for beginners"
+            rejected.append(f"{gap}:llm_query_not_grounded")
+            continue
         if article_query:
             art_tokens = {t for t in re.findall(r"[a-z0-9+#.]{2,}", normal_skill(article_query))}
             if gap_tokens and not (gap_tokens & art_tokens):
-                article_query = f"{gap} tutorial guide article"
+                rejected.append(f"{gap}:llm_article_query_not_grounded")
+                continue
         resources = await _resources_for_gap(
             settings,
             gap=gap,
@@ -246,64 +225,32 @@ async def tool_validate_and_materialize(settings: Settings, context: dict[str, A
         try:
             minutes = int(raw.get("estimated_minutes") or 60)
         except (TypeError, ValueError):
-            minutes = 60
-        minutes = max(15, min(240, minutes))
+            rejected.append(f"{gap}:llm_invalid_duration")
+            continue
+        if not 15 <= minutes <= 240:
+            rejected.append(f"{gap}:llm_invalid_duration")
+            continue
         difficulty = str(raw.get("difficulty") or "foundational").strip().lower()
         if difficulty not in {"foundational", "applied", "advanced"}:
-            difficulty = "foundational"
+            rejected.append(f"{gap}:llm_invalid_difficulty")
+            continue
         objective = str(raw.get("objective") or "").strip()
         if len(objective) < 10:
-            objective = (
-                f"Study {gap} with the recommended video lesson(s) and article(s), "
-                f"then practise a small exercise. Do not claim {gap} unless it is true experience."
-            )
+            rejected.append(f"{gap}:llm_missing_objective")
+            continue
+        title = str(raw.get("title") or "").strip()
+        if len(title) < 3:
+            rejected.append(f"{gap}:llm_missing_title")
+            continue
         accepted.append(
             _build_item(
                 gap=gap,
-                title=str(raw.get("title") or f"Learn {gap}").strip(),
+                title=title,
                 objective=objective,
                 difficulty=difficulty,
                 minutes=minutes,
                 resources=resources,
                 planner_provider=context.get("planner_provider"),
-                settings=settings,
-                position=len(accepted) + 1,
-            )
-        )
-        used.add(key)
-    for gap in allowed_gaps:
-        key = normal_skill(gap)
-        if key in used:
-            continue
-        resources = await _resources_for_gap(
-            settings,
-            gap=gap,
-            youtube_query=f"{gap} tutorial for beginners",
-            article_query=f"{gap} tutorial guide article for beginners",
-            preferred_title=None,
-        )
-        if not resources:
-            rejected.append(f"{gap}:no_safe_learning_resource")
-            continue
-        if any(r.get("resource_type") == "youtube_video" for r in resources):
-            api_hits += 1
-        if any(
-            r.get("resource_type") in {"article_search", "docs_search", "article", "blog"}
-            for r in resources
-        ):
-            reading_steps += 1
-        accepted.append(
-            _build_item(
-                gap=gap,
-                title=f"Learn {gap} with guided practice",
-                objective=(
-                    f"Study {gap} using the recommended video lesson(s) and article(s), then practise. "
-                    f"Only claim {gap} when the experience is real."
-                ),
-                difficulty="foundational" if len(accepted) < 4 else "applied",
-                minutes=60,
-                resources=resources,
-                planner_provider="validator_fill",
                 settings=settings,
                 position=len(accepted) + 1,
             )

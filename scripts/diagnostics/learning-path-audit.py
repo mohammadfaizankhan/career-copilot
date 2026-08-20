@@ -48,8 +48,8 @@ def audit_static() -> None:
         add("RED", "Expected generate CTA 'Generate from ATS gaps'")
     if "Recommended YouTube videos" in fe:
         add("RED", "UI still labels resources as Recommended YouTube videos")
-    if "Recommended lessons" not in fe:
-        add("RED", "Expected Recommended lessons label")
+    if "Recommended resources (videos + articles)" not in fe:
+        add("RED", "Expected grounded resources label")
 
     if "demo-path-1" in demo and "learning_resources" not in demo[demo.find("demo-path-1") : demo.find("demo-path-1") + 1200]:
         add("RED", "Seeded demo-path-1 missing learning_resources")

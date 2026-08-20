@@ -52,7 +52,7 @@ def list_agents(settings: Settings) -> list[dict[str, Any]]:
             "ready": any_llm,
             "model": primary_model,
             "endpoint": "POST /api/v1/resume-improvements",
-            "fallback": "Manual edit and export remain available when no LLM is configured.",
+            "fallback": "No generated suggestions are returned when all LLM attempts fail; the request is retryable.",
             "orchestration": crew_runtime_mode(),
         },
         {
@@ -87,7 +87,7 @@ def list_agents(settings: Settings) -> list[dict[str, Any]]:
             "ready": True,
             "model": primary_model,
             "endpoint": "POST /api/v1/profile/from-resume/preview",
-            "fallback": "Deterministic resume mapping when LLM providers are unavailable.",
+            "fallback": "No AI profile is returned when all LLM attempts fail; the request is retryable.",
         },
         {
             "id": AGENT_INTERVIEW_QUESTIONS,
@@ -99,7 +99,7 @@ def list_agents(settings: Settings) -> list[dict[str, Any]]:
             "ready": True,
             "model": groq.get("model") if groq.get("configured") else None,
             "endpoint": "POST /api/v1/interviews/{session_id}/start",
-            "fallback": "Local templates when Groq is unavailable (NVIDIA is never used here).",
+            "fallback": "No questions are returned when all configured LLM attempts fail; retry is required.",
         },
         {
             "id": AGENT_INTERVIEW_EVALUATION,
@@ -114,7 +114,7 @@ def list_agents(settings: Settings) -> list[dict[str, Any]]:
             "ready": True,
             "model": groq.get("model") if groq.get("configured") else None,
             "endpoint": "POST /api/v1/interviews/{session_id}/responses | complete",
-            "fallback": "Heuristic scoring + filler detection when Groq is unavailable.",
+            "fallback": "Measured transcript metrics remain available, but feedback/report generation requires an LLM.",
         },
         {
             "id": AGENT_ATS_IMPROVEMENT_BRIEF,
@@ -127,7 +127,7 @@ def list_agents(settings: Settings) -> list[dict[str, Any]]:
             "ready": True,
             "model": primary_model,
             "endpoint": "POST /api/v1/ats-analyses (summary.overall_inference)",
-            "fallback": "Deterministic missing-keyword brief when no LLM is available.",
+            "fallback": "The evidence-only ATS score remains available, but narrative generation reports an explicit LLM failure.",
         },
         {
             "id": AGENT_LEARNING_YOUTUBE_CREW,
@@ -143,7 +143,7 @@ def list_agents(settings: Settings) -> list[dict[str, Any]]:
             "ready": True,
             "model": groq.get("model") if groq.get("configured") else None,
             "endpoint": "POST /api/v1/learning-paths/generate",
-            "fallback": "Deterministic gap→video + article search plan when Groq is unavailable.",
+            "fallback": "No learning plan is materialized when the LLM planner fails; retry is required.",
             "framework": learning.get("framework"),
             "runtime": learning.get("runtime"),
             "crew_agents": learning.get("agents"),
@@ -165,7 +165,7 @@ def list_agents(settings: Settings) -> list[dict[str, Any]]:
             "ready": True,
             "model": primary_model,
             "endpoint": "POST /api/v1/resumes, POST /api/v1/job-descriptions",
-            "fallback": "Structural layout parser when no LLM is available.",
+            "fallback": "Structural parsing is retained only for document structure; generated semantic content requires an LLM.",
         },
     ]
 

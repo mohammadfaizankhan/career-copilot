@@ -9,8 +9,8 @@
     "start": "vite preview --host 127.0.0.1 --port 3000",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "check:frontend": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "test": "vitest run --pool=threads --maxWorkers=1",
+    "check:frontend": "npm run lint && npm run typecheck && npm run test && npm run e2e && npm run build",
     "validate:landing": "node scripts/validate-landing.mjs",
     "e2e": "playwright test",
     "e2e:landing": "playwright test e2e/landing.spec.ts"

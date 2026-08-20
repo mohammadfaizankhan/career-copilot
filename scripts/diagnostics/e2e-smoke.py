@@ -9,7 +9,12 @@ from pathlib import Path
 from urllib import error, request
 
 BASE = "http://127.0.0.1:8000/api/v1"
-PDF = Path(__file__).resolve().parents[2] / ".data" / "audit-resume.pdf"
+ROOT = Path(__file__).resolve().parents[2]
+PDF = ROOT / ".data" / "audit-resume.pdf"
+if not PDF.is_file():
+    # Keep the smoke workflow runnable from a clean checkout. The committed
+    # fixture is equivalent for the upload/confirmation contract.
+    PDF = ROOT / "backend" / "tests" / "fixtures" / "resumes" / "01_single_column.pdf"
 
 
 def req(method: str, path: str, data=None, token: str | None = None):

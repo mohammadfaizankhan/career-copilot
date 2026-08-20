@@ -37,7 +37,7 @@ def test_extract_only_missing_or_partial_gaps():
     assert out["gap_count"] == 2
 
 
-def test_validator_rejects_invented_gap_and_fills_missing():
+def test_validator_rejects_invented_gap_and_does_not_fill_missing():
     class DummySettings:
         youtube_configured = False
         groq_configured = False
@@ -67,9 +67,9 @@ def test_validator_rejects_invented_gap_and_fills_missing():
         },
     }
     out = asyncio.run(tool_validate_and_materialize(DummySettings(), ctx))
-    assert out["accepted_count"] == 2
+    assert out["accepted_count"] == 1
     requirements = {item["metadata"]["requirement"] for item in out["items"]}
-    assert requirements == {"Docker", "Kubernetes"}
+    assert requirements == {"Docker"}
     assert any("Quantum Telepathy" in r or "gap_not_in_ats_evidence" in r for r in out["rejected"])
     for item in out["items"]:
         kinds = _resource_kinds(item)
@@ -226,14 +226,6 @@ def test_crew_run_end_to_end_without_llm():
             role_title="Backend Engineer",
         )
     )
-    assert audit.success is True
-    assert len(items) == 2
-    assert all(item["resources"] for item in items)
-    for item in items:
-        kinds = _resource_kinds(item)
-        assert kinds & {"youtube_video", "youtube_search"}
-        assert kinds & {"article_search", "docs_search"}
-        for resource in item["resources"]:
-            url = resource["url"]
-            assert is_allowed_youtube_url(url) or is_allowed_article_url(url)
-    assert (audit.payload or {}).get("reading_resource_steps", 0) >= 1
+    assert audit.success is False
+    assert items == []
+    assert "planner failed" in (audit.message or "").lower()

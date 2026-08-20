@@ -343,6 +343,6 @@
   {
     "level": "OK",
     "area": "live",
-    "message": "http://127.0.0.1:8000/docs \u2192 HTTP 200"
+    "message": "http://127.0.0.1:8000/docs → HTTP 200"
   }
 ]
